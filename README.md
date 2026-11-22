@@ -337,6 +337,13 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 
 > **Privacy note:** Chrome and Edge send your *speech audio* to Google/Microsoft to turn it into text. The words Jarvis speaks back are made on your computer. If you want 100% offline voice, use the Jarvis desktop app (section 6) with your local model.
 
+### Auto Router: the right free model for every request (the default)
+
+Jarvis doesn't make you pick a model. The **Auto Router** looks at each request, works out the job (**quick** chat, **code**, **reason**ing and maths, **long** documents, **creative** writing), and ranks the free models that are good at that job by how fast and reliable they've actually been for you. Then it **races the best two**: it asks the best one, and if that one hasn't started answering within about 2 seconds (busy, rate-limited, slow), it asks the second as well. Whichever answers first wins and the other is cancelled. A model that fails or is slow drops down the list by itself.
+- The answer shows who won and why, e.g. *"Gemma 4 31B · auto: creative"*.
+- Say *"switch to Groq"* (or any model) to pick one yourself; *"switch to auto router"* to go back.
+- Free models it uses (each needs its provider's key in `.env`): GPT-OSS on Groq, Qwen on Cerebras, Nemotron and Kimi on NVIDIA, Gemini Flash, and on OpenRouter: **ERNIE 5.5 Flash** (reads up to 1 million tokens: long documents), **Gemma 4 31B** and **Gemma 4 26B Fast**, plus OpenRouter's free picker. Edit the `jobs` of any model in `hud/models.json` to change what it's used for. Paid models (Grok, Claude) are only used when you pick them, or with `"allow_paid": true`.
+
 ### Sophia and Jarvis: two assistants
 
 Jarvis has a partner: **Sophia**. Same Grok-style personality ([`jarvis/sophia-persona.md`](jarvis/sophia-persona.md)), her own female voice, and her own model.

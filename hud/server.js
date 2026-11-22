@@ -138,10 +138,96 @@ const byId = id => allModels().find(m => m.id === id);
 // Who takes over when a model fails: your local model if it's downloaded, otherwise the first free cloud model that
 // hasn't just failed (a Chromebook usually has no local model, and a fallback that isn't there is no fallback).
 const CLOUD_FALLBACKS = ['groq', 'cerebras', 'lightning', 'free', 'gemini'];
+
+// ---------------------------------------------------------------- Auto Router (Mark, Nov 22)
+// Like the Rocket Team experts: for each request, work out the JOB, rank the free models that are good at it by how
+// fast and reliable they've really been, then RACE the best two: ask #1, and if it hasn't started answering within
+// ~2 s (or fails), ask #2 too. The first to answer wins; the other is cancelled. Paid models only if allow_paid.
+const JOBS = {
+  code: /```|\b(code|function|bug|error|python|javascript|typescript|html|css|sql|regex|script|compile|stack ?trace|api|json|refactor)\b/i,
+  reason: /\b(why|prove|calculate|math|solve|plan|compare|analy[sz]e|explain how|step by step|strategy|pros and cons|decide|which is better)\b|\d+\s*[-+*\/^]\s*\d+/i,
+  creative: /\b(story|poem|song|lyrics|joke|script for|write me a|rap|caption|slogan|imagine)\b/i,
+  long: /\b(summari[sz]e|this (document|article|text|transcript)|tl;?dr)\b/i,
+};
+function classifyJob(message) {
+  const m = String(message || '');
+  if (m.length > 2500 || JOBS.long.test(m)) return 'long';
+  for (const j of ['code', 'reason', 'creative']) if (JOBS[j].test(m)) return j;
+  return m.split(/\s+/).length <= 12 ? 'quick' : 'chat';
+}
+const perf = {};                                   // id -> { ttft (ms, smoothed), fails, ok }
+function notePerf(id, ttft, failed, lost = false) {
+  const p = perf[id] || (perf[id] = { ttft: null, fails: 0, ok: 0 });
+  if (failed) { p.fails++; return; }
+  if (!lost) p.ok++;                                // losing a race isn't a success, but it tells us it was slow
+  p.ttft = p.ttft == null ? ttft : p.ttft * 0.7 + ttft * 0.3;
+}
+function rankFor(job, exclude = []) {
+  const recentFail = m => m.status && m.status.state === 'error' && Date.now() - (m.status.at || 0) < 3 * 60e3;
+  return allModels()
+    .filter(m => m.id !== 'auto' && m.installed && !exclude.includes(m.id) && (config.allow_paid || !m.paid) && !recentFail(m))
+    .map(m => {
+      const jobs = m.jobs || ['chat'];
+      const fit = jobs.includes(job) ? 3 : jobs.includes('chat') && job !== 'code' ? 1 : 0;
+      const p = perf[m.id] || {}, ttft = p.ttft ?? (m.local ? 4000 : 1500);
+      const reliability = p.ok || p.fails ? p.ok / (p.ok + p.fails) : 0.8;
+      return { m, score: fit * 2 + reliability * 2 - Math.min(ttft, 20000) / 2500 };
+    })
+    .filter(x => x.score > -5).sort((a, b) => b.score - a.score).map(x => x.m);
+}
+// a concrete model for jobs that can't race (agents, Lina writer, Hands plans)
+const concrete = (entry, job = 'chat') => (entry && entry.id === 'auto' ? rankFor(job)[0] || allModels().find(m => m.id !== 'auto') : entry);
+
+async function autoSpeak(send, message, system, messages, role) {
+  const job = classifyJob(message), cands = rankFor(job).slice(0, 3);
+  if (!cands.length) { send({ type: 'error', speaker: 'auto', label: 'Auto Router', message: 'no free model is available right now' }); return ''; }
+  let winner = null, launched = 0;
+  const tries = [];
+  const launch = () => {
+    const m = cands[launched++]; if (!m) return false;
+    const t = { m, ctrl: new AbortController(), t0: Date.now(), text: '', finished: false };
+    t.firstOrEnd = new Promise(res => { t.signal = res; });
+    t.done = (async () => {
+      try {
+        for await (const piece of streamModel(m, system, messages, 700, t.ctrl.signal)) {
+          if (!winner) {
+            winner = t; notePerf(m.id, Date.now() - t.t0, false);
+            for (const o of tries) if (o !== t) {                                      // cancel the slower ones,
+              if (!o.finished && !o.text) notePerf(o.m.id, Date.now() - o.t0, false, true);   // and remember they were slow
+              o.ctrl.abort();
+            }
+            send({ type: 'start', speaker: m.id, label: `${m.label} · auto: ${job}`, group: m.group, role });
+            t.signal();
+          }
+          if (winner !== t) return;
+          t.text += piece; send({ type: 'token', speaker: m.id, text: piece });
+        }
+        if (winner === t) { status[m.id] = { state: 'ok', ms: Date.now() - t.t0, at: Date.now() }; send({ type: 'end', speaker: m.id, ms: Date.now() - t.t0 }); }
+      } catch (e) {
+        if (!t.ctrl.signal.aborted) { notePerf(m.id, 0, true); status[m.id] = { state: 'error', error: cleanError(e.message), at: Date.now() }; }
+        if (winner === t) send({ type: 'error', speaker: m.id, label: m.label, message: cleanError(e.message), partial: !!t.text });
+      } finally { t.finished = true; t.signal(); }
+    })();
+    tries.push(t); return true;
+  };
+  launch();
+  while (!winner) {
+    const pending = tries.filter(t => !t.finished);
+    if (!pending.length) { if (!launch()) break; continue; }
+    const first = pending[0], expect = (perf[first.m.id] || {}).ttft;
+    const hedgeMs = Math.min(2500, Math.max(1200, (expect || 1200) * 1.5));
+    const hedge = launched < cands.length ? new Promise(r => setTimeout(() => r('hedge'), hedgeMs)) : new Promise(() => {});
+    const r = await Promise.race([...pending.map(t => t.firstOrEnd), hedge]);
+    if (r === 'hedge' && !winner) launch();                                              // #1 is slow: race #2
+  }
+  if (!winner) { send({ type: 'error', speaker: 'auto', label: 'Auto Router', message: `none of ${cands.map(c => c.label).join(', ')} answered` }); return ''; }
+  await winner.done;
+  return winner.text;
+}
 function bestFallback(activeId) {
   const recentFail = m => m.status && m.status.state === 'error' && Date.now() - (m.status.at || 0) < 5 * 60e3;
   const local = byId(config.fallback);
-  if (local && local.id !== activeId && (!local.local || local.installed) && !recentFail(local)) return local;
+  if (local && local.id !== activeId && local.id !== 'auto' && (!local.local || local.installed) && !recentFail(local)) return local;
   for (const id of config.fallbacks || CLOUD_FALLBACKS) {
     const m = byId(id);
     if (m && m.id !== activeId && !m.paid && m.installed && !recentFail(m)) return m;
@@ -280,12 +366,12 @@ function parseCommand(text) {
 // ---------------------------------------------------------------- talking to models
 const VOICE_RULES = 'Your words are spoken aloud by a voice. Plain sentences only: no markdown, lists, code blocks, tables or emojis. Keep it under 80 words unless Mark asks for detail.';
 
-async function* streamModel(entry, system, messages, maxTokens = 700) {
+async function* streamModel(entry, system, messages, maxTokens = 700, cancel = null) {
   const res = await fetch(ROUTER + '/v1/messages', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', authorization: 'Bearer ' + ROUTER_TOKEN },
     body: JSON.stringify({ model: entry.model, system, messages, max_tokens: maxTokens, stream: true, thinking: { type: 'disabled' } }),
-    signal: AbortSignal.timeout(180e3),
+    signal: cancel ? AbortSignal.any([AbortSignal.timeout(180e3), cancel]) : AbortSignal.timeout(180e3),
   });
   if (!res.ok || !res.body) {
     let msg = 'HTTP ' + res.status;
@@ -464,7 +550,7 @@ async function handleChat(body, send) {
   if (cmd && cmd.action === 'hands') return handsPlan(cmd.text, body.hands, send, say);
   if (cmd && cmd.action === 'agent') {
     if (!body.hands || !body.hands.cwd) return say('Agents live in Jarvis Hands on your computer. Run node hands/hands.js, then type: hands code, and the code it shows.');
-    const brain = byId(state.active) || allModels()[0];
+    const brain = concrete(byId(state.active) || allModels()[0], 'code');
     send({ type: 'command', action: 'agent', ...cmd, model: cmd.op === 'create' ? brain.model : undefined });
     const when = cmd.at ? ` every day at ${cmd.at}` : cmd.every_minutes ? ` every ${cmd.every_minutes >= 60 && cmd.every_minutes % 60 === 0 ? cmd.every_minutes / 60 + ' hour' + (cmd.every_minutes > 60 ? 's' : '') : cmd.every_minutes + ' minutes'}` : '';
     return say(({ create: `Hiring ${cmd.name}. Job: ${cmd.role}.${when ? ' Routine:' + when + '.' : ''} It thinks with ${brain.label}.`,
@@ -479,7 +565,13 @@ async function handleChat(body, send) {
   if (body.hands_result) return handsSummary(body.hands_result, send);
 
   const history = cleanHistory(body.history);
-  const active = byId(state.active) || allModels()[0];
+  const picked = byId(state.active) || allModels()[0];
+  if (!state.councilMode && picked.id === 'auto') {
+    const system = `${persona()}\n\n${VOICE_RULES}`;
+    await autoSpeak(send, message, system, [...history, { role: 'user', content: message }], 'answer');
+    return;
+  }
+  const active = concrete(picked, 'reason');
   const fallback = bestFallback(active.id);
 
   if (!state.councilMode) {
@@ -489,7 +581,7 @@ async function handleChat(body, send) {
   }
 
   // ---- Council: each member speaks in turn and can react to the others.
-  const members = state.council.map(id => byId(id)).filter(m => m && m.installed).slice(0, 4);
+  const members = state.council.map(id => byId(id)).filter(m => m && m.installed && m.id !== 'auto').slice(0, 4);
   const names = members.map(m => m.label);
   send({ type: 'council', members: members.map(m => m.id) });
   const said = [];
@@ -526,7 +618,7 @@ async function linaRule(request, send, say) {
     if (line) check = await lina('/check', { text: line });
     else {
       const prompt = await lina('/prompt');
-      const writer = byId(config.lina_writer) || byId(state.active) || allModels()[0];
+      const writer = concrete(byId(config.lina_writer) || byId(state.active) || allModels()[0], 'code');
       const shots = prompt.shots.flatMap(([q, a]) => [{ role: 'user', content: q }, { role: 'assistant', content: a }]);
       let messages = [...shots, { role: 'user', content: request }];
       while (tries < 2) {                                  // one retry, with the engine's reason, if the first try is invalid
@@ -590,7 +682,7 @@ function parsePlan(text) {
 
 async function handsPlan(request, hands, send, say) {
   if (!hands || !hands.cwd) return say('Hands are not connected. Run node hands/hands.js on your computer, then type: hands code, and the code it shows.');
-  const writer = byId(state.active) || allModels()[0];
+  const writer = concrete(byId(state.active) || allModels()[0], 'code');
   let text = '';
   try {
     for await (const piece of streamModel(writer, HANDS_RULES(hands), [{ role: 'user', content: request }], 300)) text += piece;
@@ -614,7 +706,7 @@ async function handsPlan(request, hands, send, say) {
 }
 
 async function handsSummary(r, send) {
-  const active = byId(state.active) || allModels()[0];
+  const active = concrete(byId(state.active) || allModels()[0], 'quick');
   const out = String(r.stdout || '').slice(0, 3000), err = String(r.stderr || '').slice(0, 1000);
   const system = `${persona()}\n\nYou just ran a command on Mark's computer through Jarvis Hands. Tell him what the result means in at most two short sentences. ${VOICE_RULES}`;
   await speak(send, active, system, [{ role: 'user', content: `Command: ${String(r.command || '').slice(0, 500)}\nExit code: ${r.code}\nOutput:\n${out || '(none)'}${err ? '\nErrors:\n' + err : ''}` }], 'answer', { fallback: bestFallback(active.id), maxTokens: 200 });
