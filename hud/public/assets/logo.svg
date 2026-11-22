@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Jarvis OS">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff1b8"/>
+      <stop offset="0.35" stop-color="#ffc83d"/>
+      <stop offset="0.7" stop-color="#e89a12"/>
+      <stop offset="1" stop-color="#ffd76a"/>
+    </linearGradient>
+    <radialGradient id="inner" cx="0.5" cy="0.45" r="0.7">
+      <stop offset="0" stop-color="#1a1408"/>
+      <stop offset="1" stop-color="#050403"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- rounded tile -->
+  <rect x="14" y="14" width="228" height="228" rx="52" fill="url(#inner)" stroke="url(#gold)" stroke-width="7" filter="url(#glow)"/>
+  <!-- two overlapping slanted frames, each a double line -->
+  <g fill="none" stroke="url(#gold)" stroke-linejoin="miter" filter="url(#glow)">
+    <path d="M62 178 L100 112 L164 112 L126 178 Z" stroke-width="9"/>
+    <path d="M78 168 L106 122 L150 122 L122 168 Z" stroke-width="3" opacity="0.85"/>
+    <path d="M100 146 L138 80 L202 80 L164 146 Z" stroke-width="9"/>
+    <path d="M116 136 L144 90 L188 90 L160 136 Z" stroke-width="3" opacity="0.85"/>
+  </g>
+</svg>

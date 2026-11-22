@@ -14,7 +14,7 @@ const NOISE = /* glsl */`
     return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
                mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z); }`;
 
-export const CORE_RADIUS = { circuit: 1.75, pulse: 1.7, portal: 1.5, plasma: 1.55, liquid: 1.7 };
+export const CORE_RADIUS = { circuit: 1.75, pulse: 1.7, portal: 1.5, plasma: 1.55, liquid: 1.7, bloom: 1.2 };
 
 export function createCores(scene, glow, { mobile = false } = {}) {
   let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -204,6 +204,68 @@ export function createCores(scene, glow, { mobile = false } = {}) {
       motes.forEach((s, i) => { s.position.set(Math.sin(t * 0.5 + i * 2.1) * 0.6, Math.cos(t * 0.4 + i) * 0.4, Math.sin(t * 0.3 + i) * 0.5); s.material.opacity = (0.45 + L * 0.4) * v; });
     } };
     faces.liquid.colorize = () => motes.forEach(s => s.material.color.copy(theme.mid));
+  }
+
+  // =============================================================== BLOOM (iridescent fibre flower)
+  {
+    const g = new THREE.Group(); scene.add(g);
+    const PETALS = 6, STRANDS = mobile ? 2200 : 5200, SEG = mobile ? 18 : 26;
+    const nV = STRANDS * SEG * 2;
+    const pos = new Float32Array(nV * 3), aT = new Float32Array(nV), aS = new Float32Array(nV), aP = new Float32Array(nV), aR = new Float32Array(nV);
+    let v = 0;
+    for (let i = 0; i < STRANDS; i++) {
+      const stamen = i % 9 === 0;                                   // some fibres burst straight out of the centre
+      const petal = Math.floor(rnd() * PETALS) + (stamen ? 0.5 : 0);
+      const side = stamen ? (rnd() - 0.5) * 0.3 : (rnd() * 2 - 1) * Math.pow(rnd(), 0.35) * Math.sign(rnd() - 0.5);
+      const seedv = rnd(), len = stamen ? 0.35 + rnd() * 0.35 : 0.75 + rnd() * 0.25;
+      for (let k = 0; k < SEG; k++) for (const e of [k, k + 1]) {
+        aT[v] = e / SEG * len; aS[v] = side; aP[v] = petal; aR[v] = seedv; v++;
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    for (const [k, a] of [['aT', aT], ['aS', aS], ['aP', aP], ['aR', aR]]) geo.setAttribute(k, new THREE.BufferAttribute(a, 1));
+    const mat = new THREE.ShaderMaterial({ ...add, uniforms: { ...shared, uVis: { value: 0 } },
+      vertexShader: /* glsl */`
+        uniform float uTime, uLevel; attribute float aT, aS, aP, aR; varying float vT, vS, vR, vEdge;
+        ${NOISE}
+        void main(){
+          float petals = 6.0;
+          float th = aP / petals * 6.28318 + uTime * 0.06 + sin(uTime * 0.3 + aP) * 0.08;
+          vec3 axis = vec3(cos(th), 0.0, sin(th)), side = vec3(-sin(th), 0.0, cos(th)), up = vec3(0.0, 1.0, 0.0);
+          float t = aT;
+          float width = pow(sin(3.14159 * min(t * 1.08, 1.0)), 0.8) * 0.75;          // petal outline
+          float lat = aS * width;
+          // petal cups upward, tips curl, edges ruffle
+          float lift = 0.55 * t * t - 0.25 * t + 0.35 * aS * aS * t;
+          float ruffle = (n3(vec3(t * 6.0, aS * 3.0, aP * 4.0 + uTime * 0.25)) - 0.5) * (0.25 + abs(aS) * 0.55) * t;
+          float breathe = 1.0 + 0.06 * sin(uTime * 0.9 + aP * 1.3) + uLevel * 0.25;
+          float twist = t * 0.9 * sin(aP * 2.1);
+          vec3 p = axis * (t * 2.2 * breathe) + side * (lat + sin(twist) * 0.2) + up * (lift + ruffle);
+          // individual fibres wander a little, like hair in water
+          p += vec3(n3(vec3(aR * 50.0, t * 4.0, uTime * 0.35)), n3(vec3(t * 4.0, aR * 50.0, uTime * 0.3)), n3(vec3(uTime * 0.3, t * 4.0, aR * 50.0)) ) * 0.12 * t - 0.06 * t;
+          vT = t; vS = aS; vR = aR; vEdge = abs(aS);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        uniform float uVis, uTime, uLevel; uniform vec3 uHot, uMid; varying float vT, vS, vR, vEdge;
+        void main(){
+          // thin-film iridescence: lavender, gold, sky blue, rose
+          vec3 iri = 0.55 + 0.45 * cos(6.28318 * (vT * 0.9 + vS * 0.35 + vR * 0.5 + uTime * 0.03 + vec3(0.0, 0.33, 0.67)));
+          vec3 col = mix(iri, mix(uHot, uMid, vT), 0.28);
+          col = mix(col, vec3(1.0, 0.78, 0.45), smoothstep(0.25, 0.0, vT) * 0.6);      // warm golden heart
+          float a = (0.055 + vEdge * 0.06 + smoothstep(0.2, 0.0, vT) * 0.08) * smoothstep(1.0, 0.82, vT / 1.0) * uVis * (1.0 + uLevel * 0.8);
+          gl_FragColor = vec4(col * a * 2.2, a);
+        }`,
+    });
+    const lines = new THREE.LineSegments(geo, mat); lines.frustumCulled = false; g.add(lines);
+    const heart = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color: new THREE.Color('#ffd08a'), ...add, opacity: 0 })); heart.scale.setScalar(1.4); g.add(heart);
+    g.rotation.set(0.5, 0, 0.12);
+    faces.bloom = { g, update(dt, t, L, vv) {
+      g.visible = vv > 0.01; if (!g.visible) return;
+      mat.uniforms.uVis.value = vv; heart.material.opacity = (0.5 + L * 0.4) * vv;
+      g.rotation.y += dt * 0.05; g.rotation.x = 0.5 + Math.sin(t * 0.15) * 0.08; g.scale.setScalar(0.4 + 0.6 * vv);
+    } };
   }
 
   function setTheme(th) {

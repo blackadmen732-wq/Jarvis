@@ -1,1 +1,2 @@
 milkyway.jpg / milkyway-small.jpg: "The Milky Way panorama", ESO/S. Brunier, CC BY 4.0 (https://www.eso.org/public/images/eso0932a/). Resized.
+blackhole.js disk physics (Shakura-Sunyaev temperature and flux profile, relativistic Doppler factor, Schwarzschild redshift): adapted from Adriwin06/black-hole, MIT License, Copyright (c) 2015 Otto Seiskari, Copyright (c) 2026 Adriwin (https://github.com/Adriwin06/black-hole).

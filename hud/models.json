@@ -1,6 +1,8 @@
 {
-  "_help": "Your favourite models. 'model' is provider/model as the router knows it. 'aliases' are words you can say: 'Jarvis, switch to <alias>'. 'group' picks the colour family on the HUD. Local Ollama models you download are added automatically.",
-  "active": "groq",
+  "_help": "Your favourite models. 'model' is provider/model as the router knows it. 'aliases' are words you can say: 'Jarvis, switch to <alias>'. 'group' picks the colour family on the HUD. Local Ollama models you download are added automatically. 'lina_writer' is the model that turns your spoken rules into Lina (the Lina checker always has the final word). 'personality' is Jarvis's default style: 'grok' (witty, blunt, no lectures) or 'classic'; switch by voice with \"Grok mode\" / \"serious mode\". 'jobs' tells the Auto Router what a model is good at: quick, chat, code, reason, long, creative.",
+  "active": "auto",
+  "lina_writer": "groq",
+  "personality": "grok",
   "fallback": "qwen7b",
   "council": [
     "nemotron",
@@ -8,6 +10,22 @@
     "cerebras"
   ],
   "models": [
+    {
+      "id": "auto",
+      "label": "Auto Router",
+      "group": "Auto",
+      "model": "auto",
+      "aliases": [
+        "auto router",
+        "router",
+        "smart",
+        "smart routing",
+        "best",
+        "best model",
+        "auto route"
+      ],
+      "note": "picks the best free models for each request and races two, first answer wins"
+    },
     {
       "id": "groq",
       "label": "GPT-OSS 120B",
@@ -19,6 +37,12 @@
         "gpt",
         "gpt oss",
         "default"
+      ],
+      "jobs": [
+        "quick",
+        "chat",
+        "code",
+        "reason"
       ]
     },
     {
@@ -29,7 +53,14 @@
       "aliases": [
         "cerebras",
         "qwen"
-      ]
+      ],
+      "jobs": [
+        "quick",
+        "chat",
+        "code"
+      ],
+      "paid": true,
+      "note": "Cerebras ended its free tier on Jul 21 2026 (now a $5 trial with a card). Only used when you pick it."
     },
     {
       "id": "kimi",
@@ -42,7 +73,12 @@
         "deep",
         "thinker"
       ],
-      "note": "smart but slow (up to a minute)"
+      "note": "smart but slow (up to a minute)",
+      "jobs": [
+        "reason",
+        "code",
+        "long"
+      ]
     },
     {
       "id": "nemotron",
@@ -53,6 +89,10 @@
         "nemotron",
         "nvidia",
         "ultra"
+      ],
+      "jobs": [
+        "reason",
+        "long"
       ]
     },
     {
@@ -64,6 +104,10 @@
         "lightning",
         "quick",
         "nemotron lightning"
+      ],
+      "jobs": [
+        "quick",
+        "chat"
       ]
     },
     {
@@ -76,7 +120,119 @@
         "free model",
         "open router",
         "openrouter"
+      ],
+      "jobs": [
+        "chat"
       ]
+    },
+    {
+      "id": "ernie",
+      "label": "ERNIE 5.5 Flash",
+      "group": "OpenRouter",
+      "model": "open_router/baidu/ernie-5.5-flash-preview:free",
+      "aliases": [
+        "ernie",
+        "baidu",
+        "ernie flash"
+      ],
+      "jobs": [
+        "long",
+        "reason",
+        "chat"
+      ],
+      "note": "free, reads up to 1 million tokens at once: long documents and research"
+    },
+    {
+      "id": "gemma31",
+      "label": "Gemma 4 31B",
+      "group": "OpenRouter",
+      "model": "open_router/google/gemma-4-31b-it:free",
+      "aliases": [
+        "gemma",
+        "gemma 31",
+        "gemma big",
+        "google gemma"
+      ],
+      "jobs": [
+        "chat",
+        "creative",
+        "reason"
+      ],
+      "note": "free, Google, strong all-rounder"
+    },
+    {
+      "id": "gemma26",
+      "label": "Gemma 4 26B Fast",
+      "group": "OpenRouter",
+      "model": "open_router/google/gemma-4-26b-a4b-it:free",
+      "aliases": [
+        "gemma fast",
+        "gemma 26",
+        "fast gemma"
+      ],
+      "jobs": [
+        "quick",
+        "chat",
+        "creative"
+      ],
+      "note": "free, Google, mixture of experts: big-model quality at small-model speed"
+    },
+    {
+      "id": "particle",
+      "label": "Particle-1",
+      "group": "OpenRouter",
+      "model": "open_router/particle-ai/particle-1:free",
+      "aliases": [
+        "particle",
+        "particle one"
+      ],
+      "jobs": [
+        "code",
+        "reason"
+      ],
+      "note": "free, built for coding agents, 1M context"
+    },
+    {
+      "id": "nemotron-or",
+      "label": "Nemotron Ultra (OpenRouter)",
+      "group": "OpenRouter",
+      "model": "open_router/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "aliases": [
+        "nemotron openrouter"
+      ],
+      "jobs": [
+        "reason",
+        "long"
+      ],
+      "note": "free on OpenRouter too, the biggest free reasoning model"
+    },
+    {
+      "id": "lightning-or",
+      "label": "Nemotron Lightning (OpenRouter)",
+      "group": "OpenRouter",
+      "model": "open_router/nvidia/nemotron-3.5-lightning:free",
+      "aliases": [
+        "lightning openrouter"
+      ],
+      "jobs": [
+        "quick",
+        "chat"
+      ],
+      "note": "free, fast"
+    },
+    {
+      "id": "ling",
+      "label": "Ling 3.2 Flash",
+      "group": "OpenRouter",
+      "model": "open_router/inclusionai/ling-3.2-flash:free",
+      "aliases": [
+        "ling"
+      ],
+      "jobs": [
+        "chat",
+        "long"
+      ],
+      "note": "free, 1M context, reads images"
     },
     {
       "id": "gemini",
@@ -86,7 +242,40 @@
       "aliases": [
         "gemini",
         "google"
-      ]
+      ],
+      "jobs": [
+        "long"
+      ],
+      "note": "free tier is small (about 20 requests a day): kept for long documents"
+    },
+    {
+      "id": "grok",
+      "label": "Grok 4.7",
+      "group": "xAI",
+      "model": "open_router/x-ai/grok-4.7",
+      "aliases": [
+        "grok",
+        "grok 4.7",
+        "x ai",
+        "xai",
+        "elon",
+        "elon's model"
+      ],
+      "paid": true,
+      "note": "the real Grok, through OpenRouter (pay per use: about $2 per million words in, $6 out)"
+    },
+    {
+      "id": "grok-lite",
+      "label": "Grok 4.3",
+      "group": "xAI",
+      "model": "open_router/x-ai/grok-4.3",
+      "aliases": [
+        "grok 4.3",
+        "cheap grok",
+        "grok lite"
+      ],
+      "paid": true,
+      "note": "cheaper Grok (about $1.25 in, $2.50 out per million words)"
     },
     {
       "id": "claude",
@@ -101,6 +290,37 @@
       "paid": true
     },
     {
+      "id": "my-claude",
+      "label": "Claude (your account)",
+      "group": "Your accounts",
+      "model": "cli/claude",
+      "aliases": [
+        "my claude",
+        "my claude account",
+        "claude account",
+        "claude code",
+        "claude subscription",
+        "my anthropic"
+      ],
+      "note": "your own Claude Pro/Max subscription, through Claude Code on your computer (needs Jarvis Hands)"
+    },
+    {
+      "id": "my-chatgpt",
+      "label": "ChatGPT (your account)",
+      "group": "Your accounts",
+      "model": "cli/codex",
+      "aliases": [
+        "my chatgpt",
+        "chatgpt",
+        "chat gpt",
+        "my chat gpt",
+        "chatgpt account",
+        "codex",
+        "my openai"
+      ],
+      "note": "your own ChatGPT subscription, through OpenAI's Codex on your computer (needs Jarvis Hands)"
+    },
+    {
       "id": "qwen7b",
       "label": "Qwen 7B Uncensored",
       "group": "Local",
@@ -111,7 +331,11 @@
         "seven b",
         "uncensored 7b"
       ],
-      "note": "all-round uncensored, good at following instructions and using tools"
+      "note": "all-round uncensored, good at following instructions and using tools",
+      "jobs": [
+        "chat",
+        "code"
+      ]
     },
     {
       "id": "uncensored",
@@ -126,7 +350,12 @@
         "private",
         "nine b"
       ],
-      "note": "smartest everyday uncensored model in the set"
+      "note": "smartest everyday uncensored model in the set",
+      "jobs": [
+        "chat",
+        "creative",
+        "reason"
+      ]
     },
     {
       "id": "coder",
@@ -139,7 +368,10 @@
         "code",
         "programmer"
       ],
-      "note": "writing and fixing code"
+      "note": "writing and fixing code",
+      "jobs": [
+        "code"
+      ]
     },
     {
       "id": "vision",
@@ -152,7 +384,10 @@
         "see",
         "screen"
       ],
-      "note": "can look at images and your screen (used for laptop control)"
+      "note": "can look at images and your screen (used for laptop control)",
+      "jobs": [
+        "chat"
+      ]
     },
     {
       "id": "fast",
@@ -165,7 +400,29 @@
         "tiny",
         "small"
       ],
-      "note": "instant replies, lower quality"
+      "note": "instant replies, lower quality",
+      "jobs": [
+        "quick"
+      ]
     }
-  ]
+  ],
+  "daily_limits": {
+    "_help": "free requests a day per provider; the Auto Router stops using a provider before it runs out. OpenRouter: 50 (1000 after a one-time $10 credit).",
+    "open_router": 50,
+    "groq": 1000,
+    "gemini": 20,
+    "nvidia_nim": 1000
+  },
+  "fallbacks": [
+    "groq",
+    "lightning",
+    "free",
+    "gemma26"
+  ],
+  "tts": {
+    "_help": "free natural voices through OpenRouter (Fish Audio). Each spoken reply uses one OpenRouter request.",
+    "model": "fish-audio/s2.1-pro-free:free",
+    "jarvis": "Speak as Jarvis: a calm, witty, confident British man in his thirties, warm low voice, natural pace.",
+    "sophia": "Speak as Sophia: a warm, playful, confident young woman, bright expressive voice, natural pace, a little teasing."
+  }
 }

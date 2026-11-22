@@ -5,7 +5,7 @@
   const TAU = Math.PI * 2;
   const store = {
     get(k, d) { try { const v = localStorage.getItem('jarvis.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-    set(k, v) { try { localStorage.setItem('jarvis.' + k, JSON.stringify(v)); } catch {} },
+    set(k, v) { try { localStorage.setItem('jarvis.' + k, JSON.stringify(v)); } catch {} try { notePref(k); } catch {} },
   };
 
   // ------------------------------------------------------------------ app state
@@ -18,7 +18,9 @@
   let voiceOn = store.get('voice', true), wakeOn = false;
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   let fxOn = store.get('fx', true), lastType = 0, ac = null, holoOn = store.get('holo', true), sceneName = store.get('scene2', 'auto'), homeCore = store.get('home', 'blackhole'), themeName = store.get('theme', 'amber');
+  { const R = { circuit: 'plasma', pulse: 'liquid', stream: 'brain' }; sceneName = R[sceneName] || sceneName; homeCore = R[homeCore] || homeCore; }   // retired cores
   if (sceneName === 'space') sceneName = 'auto';
+  document.body.dataset.scene = sceneName;
   const GLYPHS = '▓▒░<>/\\|=+*#ABCDEF0123456789';
 
   function setState(s) {
@@ -360,6 +362,7 @@
     try {
       const r = await fetch('/api/state'); if (!r.ok) throw new Error();
       Object.assign(S, await r.json());
+      if (S.assistant) applyAssistant(S.assistant);
     } catch { S.router = { online: false }; }
     render();
   }
@@ -411,11 +414,42 @@
   }
   function switchTo(id) {
     if (id === S.active) return;
-    const m = S.models.find(x => x.id === id);
+    const from = S.models.find(x => x.id === S.active), to = S.models.find(x => x.id === id);
     command({ action: 'switch', id });
     fx('route');
     flash(id);
-    if (m) addMsg('sys', 'Jarvis', `Routing to ${m.label}.`);
+    if (to) linkCard(from, to);
+  }
+
+  // ---- LINK TRANSFER card: shows exactly which model the link moves to
+  let pendingLink = null;
+  function linkCard(from, to) {
+    const tag = (txt, cls) => `<span class="lc-tag ${cls}">${txt}</span>`;
+    const badge = m => !m ? '' : String(m.model).startsWith('cli/') ? [tag('YOUR ACCOUNT', 'local'), tag('ON THIS COMPUTER', 'free')].join('')
+      : [m.local ? tag('LOCAL', 'local') : tag('CLOUD', 'cloud'), m.paid ? tag('PAID', 'paid') : tag('FREE', 'free')].join('');
+    const el = document.createElement('div');
+    el.className = 'link-card';
+    el.innerHTML = `
+      <div class="lc-head"><span>⚡ LINK TRANSFER</span><span class="lc-status">ESTABLISHING…</span></div>
+      <div class="lc-row lc-from"><span class="lc-k">FROM</span><span class="lc-name"></span><span class="lc-sub"></span></div>
+      <div class="lc-beam"><i></i></div>
+      <div class="lc-row lc-to"><span class="lc-k">TO</span><span class="lc-name"></span><span class="lc-sub"></span></div>
+      <div class="lc-tags">${badge(to)}</div>
+      <div class="lc-model"></div>`;
+    el.querySelector('.lc-from .lc-name').textContent = from ? from.label : '—';
+    el.querySelector('.lc-from .lc-sub').textContent = from ? from.group : '';
+    el.querySelector('.lc-to .lc-name').textContent = to.label;
+    el.querySelector('.lc-to .lc-sub').textContent = to.group;
+    el.querySelector('.lc-model').textContent = to.model;
+    log.appendChild(el); log.scrollTop = log.scrollHeight;
+    decipher(el.querySelector('.lc-to .lc-name'), to.label, 700);
+    setTimeout(() => { el.classList.add('done'); el.querySelector('.lc-status').textContent = 'LINKED'; fx('msg'); }, 1100);
+    pendingLink = { el, id: to.id };
+  }
+  function linkLatency(id, ms) {
+    if (!pendingLink || pendingLink.id !== id) return;
+    const s = pendingLink.el.querySelector('.lc-status'); s.textContent = `LINKED · ${(ms / 1000).toFixed(2)} s`;
+    pendingLink = null;
   }
   function toggleSeat(id) {
     let ids = S.council.includes(id) ? S.council.filter(x => x !== id) : [...S.council, id];
@@ -439,20 +473,204 @@
   }
   $('#clear-log').addEventListener('click', () => { log.innerHTML = ''; history.length = 0; });
 
+  // ------------------------------------------------------------------ Jarvis Hands (your computer, ../../hands/hands.js)
+  // This page (in YOUR browser, on your computer) is what talks to Jarvis Hands, never the server in Docker.
+  // Pair once: start `node hands/hands.js`, then type "hands code <code>". Steps run straight away.
+  const HANDS = 'http://localhost:3003';   // Jarvis Hands (terminal); laptop control is 3002
+  let handsToken = store.get('handsToken', ''), handsInfo = null, queuedStep = null, queuedAgent = null, queuedBrain = null;
+  async function handsFetch(p, body) {
+    const r = await fetch(HANDS + p, body ? { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': handsToken }, body: JSON.stringify(body) }
+                                          : { headers: { 'x-jarvis-token': handsToken } });
+    const j = await r.json().catch(() => ({ error: 'HTTP ' + r.status }));
+    if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+    return j;
+  }
+  async function handsConnect(quiet) {
+    if (!handsToken) { handsInfo = null; return false; }
+    try {
+      handsInfo = await handsFetch('/info');
+      if (!quiet) { addMsg('sys', 'Jarvis', `Hands connected to ${handsInfo.os}. Work folder: ${handsInfo.cwd}.`); chime(660, 990); }
+      return true;
+    } catch (e) {
+      handsInfo = null;
+      if (!quiet) addMsg('err', 'Hands', `Couldn't reach Jarvis Hands (${e.message}). Is "node hands/hands.js" running on this computer?`);
+      return false;
+    }
+  }
+  // opened by the Jarvis app launcher (scripts/jarvis-launch.sh): it passes the pairing code in the address, so Mark
+  // never has to type it. The code is stored, then removed from the address bar.
+  // ---- your choices follow you: voices, theme, eco, wake word, Jarvis/Sophia go to Supabase through the HUD server
+  // (never the Hands pairing code or anything secret). The newest copy wins; a new computer picks them up on load.
+  const PREF_KEYS = ['fx', 'holo', 'scene2', 'home', 'theme', 'voice', 'engine', 'studioVoice', 'voiceName', 'rate', 'pitch', 'wake',
+                     'assistant', 'voice.jarvis', 'voice.sophia', 'quality'];
+  let prefTimer = null, applyingPrefs = false;
+  function notePref(k) {
+    if (applyingPrefs || !PREF_KEYS.includes(k)) return;
+    clearTimeout(prefTimer);
+    prefTimer = setTimeout(() => {
+      const value = {};
+      try { for (const key of PREF_KEYS) { const v = localStorage.getItem('jarvis.' + key); if (v !== null) value[key] = v; } } catch { return; }
+      const at = new Date().toISOString(); try { localStorage.setItem('jarvis.prefs_at', JSON.stringify(at)); } catch {}
+      fetch('/api/prefs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value, updated_at: at }) }).catch(() => {});
+    }, 2500);
+  }
+  (async () => {
+    try {
+      const r = await (await fetch('/api/prefs')).json();
+      const localAt = store.get('prefs_at', null);
+      if (!r.updated_at || (localAt && Date.parse(localAt) >= Date.parse(r.updated_at))) return;
+      applyingPrefs = true;
+      for (const [k, v] of Object.entries(r.value || {})) if (PREF_KEYS.includes(k) && typeof v === 'string') localStorage.setItem('jarvis.' + k, v);
+      localStorage.setItem('jarvis.prefs_at', JSON.stringify(r.updated_at));
+      if (!sessionStorage.getItem('jarvis.prefsLoaded')) { sessionStorage.setItem('jarvis.prefsLoaded', '1'); location.reload(); }
+    } catch {} finally { applyingPrefs = false; }
+  })();
+  const fromLauncher = location.hash.match(/hands=([a-f0-9]{12})/);
+  if (fromLauncher) { handsToken = fromLauncher[1]; store.set('handsToken', handsToken); window.history.replaceState(null, '', location.pathname + location.search); }
+  handsConnect(!fromLauncher);
+  async function handsRun(step) {
+    try {
+      if (step.action === 'open') { await handsFetch('/open', { url: step.url }); addMsg('sys', 'Jarvis', `Opened ${step.url}`); return null; }
+      const r = await handsFetch('/run', { command: step.command });
+      const out = [r.stdout, r.stderr].filter(Boolean).join('\n').trim();
+      const el = addMsg('sys hands-out', `Hands · ${r.code === 0 ? 'done' : 'exit ' + r.code}`, `$ ${r.command}\n${out || '(no output)'}`, (r.ms / 1000).toFixed(1) + 's');
+      el.classList.toggle('err', r.code !== 0);
+      return r;
+    } catch (e) { addMsg('err', 'Hands', e.message); return null; }
+  }
+
+  // ------------------------------------------------------------------ agents (hands/agents.js, on your computer)
+  const seenRuns = new Set(store.get('seenRuns', []));
+  const markSeen = id => { seenRuns.add(id); store.set('seenRuns', [...seenRuns].slice(-200)); };
+  const routineText = a => a.at ? `every day at ${a.at}` : a.every_minutes ? `every ${a.every_minutes} min` : 'on request';
+  function say(text) { addMsg('sys', 'Jarvis', text); speakText(text); }
+  async function watchRun(runId, name) {
+    markSeen(runId); let shown = 0;
+    for (let i = 0; i < 400; i++) {                      // up to ~20 minutes
+      await new Promise(r => setTimeout(r, 2500));
+      let run; try { run = (await handsFetch('/runs?id=' + encodeURIComponent(runId))).run; } catch { continue; }
+      for (; shown < run.steps.length; shown++) {
+        const st = run.steps[shown];
+        const head = st.action === 'run' ? `$ ${st.command}` : st.action === 'open' ? `open ${st.url}`
+          : st.action === 'brain' ? `${st.engine === 'codex' ? 'ChatGPT' : 'Claude'} (your account) worked on it:` : '(unclear reply, asked again)';
+        addMsg('sys hands-out', `${name} · step ${shown + 1}`, `${head}${st.why ? '   # ' + st.why : ''}\n${String(st.result || '').trim()}`);
+      }
+      if (run.status !== 'running') { say(`${name}: ${run.summary || run.status}`); return; }
+    }
+  }
+  async function agentOp(d) {
+    try {
+      if (d.op === 'create') {
+        const { agent: a } = await handsFetch('/agents', { name: d.name, role: d.role, task: d.task, model: d.model, every_minutes: d.every_minutes, at: d.at, engine: d.engine || 'router' });
+        say(`${a.name} is on the team. Job: ${a.role}. Routine: ${routineText(a)}. Say "ask ${a.name} to ..." to give it work.`);
+      } else if (d.op === 'list') {
+        const { agents, running } = await handsFetch('/agents');
+        if (!agents.length) return say('No agents yet. Say "create an agent called scout that ..." to hire one.');
+        addMsg('sys hands-out', 'Team', agents.map(a => `${a.name}${running.includes(a.id) ? ' (working)' : ''} · ${routineText(a)}\n  ${a.role}${a.last_summary ? '\n  last: ' + a.last_summary : ''}`).join('\n'));
+        speakText(`You have ${agents.length} agent${agents.length > 1 ? 's' : ''}: ${agents.map(a => a.name).join(', ')}.`);
+      } else if (d.op === 'delete') {
+        const r = await handsFetch('/agents/delete', { name: d.name }); say(`${r.removed} has left the team.`);
+      } else if (d.op === 'run') {
+        const r = await handsFetch('/agents/run', { name: d.name, task: d.task || '' });
+        if (r.already) { say(`${r.agent} is already working on something.`); return; }
+        watchRun(r.run, r.agent);
+      } else if (d.op === 'report') {
+        const { runs } = await handsFetch('/runs?agent=' + encodeURIComponent(d.name));
+        const last = runs[runs.length - 1];
+        if (!last) return say(`${d.name} hasn't done anything yet.`);
+        addMsg('sys hands-out', `${last.name} · last run (${last.why})`, `Task: ${last.task}\n${last.steps.map((s, i) => `${i + 1}. ${s.command ? '$ ' + s.command : s.url || s.action}`).join('\n')}`);
+        say(`${last.name}: ${last.summary || last.status}`);
+      }
+    } catch (e) { addMsg('err', 'Agents', e.message); }
+  }
+  // your own Claude / ChatGPT accounts: Claude Code or Codex does the work on this computer (hands/brains.js)
+  async function runBrain(d) {
+    setState('thinking'); flowDir = 1;
+    const wait = addMsg('sys', d.label, d.chat ? 'Thinking…' : 'Working on it on your computer…');
+    let r; try { r = await handsFetch('/brain', { engine: d.engine, prompt: d.prompt, system: d.system || '' }); } catch (e) { r = { ok: false, text: e.message }; }
+    wait.remove();
+    if (!r.ok) { addMsg('err', d.label, r.text || 'no answer'); setState('idle'); return; }
+    if (d.chat) {
+      addMsg('', `${myName()} · ${d.label}`, r.text, ((r.ms || 0) / 1000).toFixed(1) + 's');
+      history.push({ role: 'user', content: d.prompt.split('Mark: ').pop() }, { role: 'assistant', content: r.text });
+      speakText(r.text);
+    } else {
+      addMsg('sys hands-out', `${d.label} · done`, r.text, ((r.ms || 0) / 1000).toFixed(1) + 's');
+      speakText(r.text.replace(/```[\s\S]*?```/g, ' ').split(/(?<=[.!?])\s+/).slice(0, 2).join(' '));   // the gist out loud
+    }
+    if (!speaking) setState('idle');
+  }
+
+  // ---- API keys form: Hands writes them into .env on this computer and restarts the model router
+  const KEYS = [
+    ['GROQ_API_KEY', 'Groq (fast, free)', 'https://console.groq.com/keys'],
+    ['OPENROUTER_API_KEY', 'OpenRouter (free models; Grok and Claude with credit)', 'https://openrouter.ai/keys'],
+    ['GEMINI_API_KEY', 'Gemini (free, small)', 'https://aistudio.google.com/apikey'],
+    ['NVIDIA_NIM_API_KEY', 'NVIDIA (Nemotron, Kimi)', 'https://build.nvidia.com/settings/api-keys'],
+    ['ZAI_API_KEY', 'Z.ai (GLM)', 'https://z.ai/manage-apikey/apikey-list'],
+    ['JARVIS_SYNC_TOKEN', 'Supabase sync code (your own random code)', ''],
+  ];
+  async function openKeys() {
+    const panel = $('#keys-panel'), form = $('#keys-form'), msg = $('#keys-msg');
+    if (!handsInfo) { addMsg('sys', myName(), 'The keys form saves through Jarvis Hands on your computer. Open Jarvis from its app icon (it starts Hands), then try again.'); return; }
+    let have = {}; try { have = (await handsFetch('/keys')).keys; } catch (e) { addMsg('err', 'Keys', e.message); return; }
+    form.innerHTML = '';
+    for (const [k, label, link] of KEYS) {
+      const row = document.createElement('div'); row.className = 'kp-row';
+      row.innerHTML = `<label for="kp-${k}"></label>${link ? `<a target="_blank" rel="noopener" href="${link}">get a key ↗</a>` : '<span></span>'}<input id="kp-${k}" type="password" spellcheck="false"><span class="kp-set"></span>`;
+      row.querySelector('label').textContent = label;
+      const st = row.querySelector('.kp-set'); st.textContent = have[k] ? '✓ saved' : 'not set'; st.classList.toggle('no', !have[k]);
+      row.querySelector('input').placeholder = have[k] ? 'paste a new one to replace it' : 'paste your key';
+      row.querySelector('input').dataset.key = k; form.appendChild(row);
+    }
+    msg.textContent = ''; panel.hidden = false;
+  }
+  $('#t-keys').addEventListener('click', () => { const p = $('#keys-panel'); if (p.hidden) openKeys(); else p.hidden = true; });
+  $('#keys-close').addEventListener('click', () => { $('#keys-panel').hidden = true; });
+  $('#keys-save').addEventListener('click', async () => {
+    const keys = {}; for (const i of $('#keys-form').querySelectorAll('input')) if (i.value.trim()) keys[i.dataset.key] = i.value.trim();
+    const msg = $('#keys-msg');
+    if (!Object.keys(keys).length) { msg.textContent = 'Nothing new to save.'; return; }
+    try {
+      const r = await handsFetch('/keys', { keys });
+      for (const i of $('#keys-form').querySelectorAll('input')) i.value = '';                  // don't keep keys on screen
+      msg.textContent = r.saved.length ? `Saved ${r.saved.length}. Restarting the model router…` : 'Those didn\'t look like keys (no spaces, at least 8 characters).';
+      if (r.saved.length) { chime(660, 990); setTimeout(() => { $('#keys-panel').hidden = true; say(`Keys saved. Give me about thirty seconds to restart, then say status.`); }, 1500); }
+    } catch (e) { msg.textContent = e.message; }
+  });
+
+  // routines run on their own while Hands is on; tell Mark when one finishes
+  let primed = false;                                   // the first check only notes runs that finished before
+  setInterval(async () => {
+    if (!handsInfo) return;
+    try {
+      const { agents } = await handsFetch('/agents');
+      for (const a of agents) if (a.last_run && !seenRuns.has(a.last_run)) { markSeen(a.last_run); if (primed) say(`${a.name} finished its routine: ${a.last_summary || a.last_status}`); }
+      primed = true;
+    } catch {}
+  }, 20e3);
+
   // ------------------------------------------------------------------ chat
   let busy = false;
-  async function send(text) {
+  async function send(text, extra = null) {
     text = String(text || '').trim();
     if (!text || busy) return;
+    const pair = text.match(/^(?:jarvis[,\s]+)?hands (?:code|pair)\s+([a-f0-9]{12})$/i);
+    if (pair || /^(?:jarvis[,\s]+)?hands (?:disconnect|unpair|forget)$/i.test(text)) {
+      $('#input').value = ''; addMsg('user', 'You', pair ? 'hands code ••••' : text);
+      handsToken = pair ? pair[1].toLowerCase() : ''; store.set('handsToken', handsToken);
+      if (pair) await handsConnect(false); else { handsInfo = null; addMsg('sys', 'Jarvis', 'Hands disconnected. I can no longer touch your computer.'); }
+      return;
+    }
     busy = true;
     stopSpeaking();
     $('#input').value = '';
-    addMsg('user', 'You', text);
+    if (!extra) addMsg('user', 'You', text);
     setState('thinking'); flowDir = 1; speakingId = S.active;
     let bubble = null, bubbleText = '', prevSpeaker = null, finalText = '', pending = null, role = '';
     const flushSpeech = () => { if (pending) { speakText(pending); pending = null; } };
     try {
-      const res = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, history: history.slice(-12) }) });
+      const res = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, history: history.slice(-12), hands: handsInfo, ...(extra || {}) }) });
       const reader = res.body.getReader(), dec = new TextDecoder();
       let buf = '';
       for (;;) {
@@ -468,7 +686,7 @@
             flushSpeech();
             role = d.role;
             const kind = ({ member: 'member', verdict: 'verdict', system: 'sys' })[d.role] || '';
-            const who = d.role === 'member' ? `${d.label} · council` : d.role === 'verdict' ? `Jarvis verdict · ${d.label}` : d.role === 'system' ? 'Jarvis' : `Jarvis · ${d.label}`;
+            const who = d.role === 'member' ? `${d.label} · council` : d.role === 'verdict' ? `${myName()} verdict · ${d.label}` : d.role === 'system' ? (d.label || myName()) : d.role === 'lina' ? `Lina writer · ${d.label}` : `${myName()} · ${d.label}`;
             bubble = addMsg(kind + ' typing', who, ''); bubbleText = '';
             if (d.speaker !== 'jarvis') {
               if (S.councilMode && prevSpeaker && prevSpeaker !== d.speaker) beams.push({ from: prevSpeaker, to: d.speaker, life: 2.6 });
@@ -485,7 +703,8 @@
             if (pending !== null) pending = d.text;
           } else if (d.type === 'end') {
             if (bubble) { bubble.classList.remove('typing'); if (d.ms) bubble.querySelector('.ms').textContent = (d.ms / 1000).toFixed(1) + 's'; }
-            const speakIt = role !== 'member' || !S.councilMode ? true : store.get('speakMembers', false);
+            if (d.ms) linkLatency(d.speaker, d.ms);
+            const speakIt = role === 'lina' ? false : role !== 'member' || !S.councilMode ? true : store.get('speakMembers', false);   // Jarvis explains Lina in English
             if (speakIt) pending = bubbleText;
             if (role === 'answer' || role === 'verdict') finalText = bubbleText;
             if (role === 'system' && !finalText) finalText = bubbleText;
@@ -497,12 +716,23 @@
             addMsg('sys', 'Jarvis', `${d.label} taking over.`);
             beams.push({ from: d.from, to: d.to, life: 2.5 });
           } else if (d.type === 'command') {
-            if (d.action === 'switch') { S.active = d.id; render(); flash(d.id); fx('route'); }
+            if (d.action === 'switch') { const from = S.models.find(x => x.id === S.active), to = S.models.find(x => x.id === d.id); S.active = d.id; render(); flash(d.id); fx('route'); if (to) linkCard(from, to); }
             if (d.action === 'voice') changeVoice(d.query);
             if (d.action === 'holo') setHolo(d.on, true);
+            if (d.action === 'play') window.JarvisScene?.play?.(d.what);
+            if (d.action === 'control') controlCmd(d);
             if (d.action === 'scene') setScene(d.scene, true);
             if (d.action === 'theme') setTheme(d.theme, true);
             if (d.action === 'council') { S.councilMode = d.on; render(); chime(d.on ? 520 : 880, d.on ? 780 : 520); }
+            if (d.action === 'lina') { if (d.status === 'invalid') chime(300, 220); else chime(660, d.status === 'saved' ? 990 : 880); }
+            if (d.action === 'hands_proposal') { addMsg('sys hands-out', 'Proposed step · waiting for "confirm"', d.step.action === 'open' ? `open ${d.step.url}` : `$ ${d.step.command}`); chime(520, 660); }
+            if (d.action === 'hands_refused') { addMsg('err', 'Hands · locked', `$ ${d.command}\nRefused: ${d.reason}`); chime(300, 220); }
+            if (d.action === 'hands_run') queuedStep = d.step;
+            if (d.action === 'quality') { try { localStorage.setItem('jarvis.quality', JSON.stringify(d.level)); } catch {} notePref('quality'); if (window.JarvisScene) setTimeout(() => location.reload(), 4500); }
+            if (d.action === 'assistant') { S.assistantLabel = d.label; applyAssistant(d.name); if (d.active) { S.active = d.active; render(); } chime(d.name === 'sophia' ? 740 : 520, d.name === 'sophia' ? 1110 : 780); }
+            if (d.action === 'agent') queuedAgent = d;
+            if (d.action === 'brain') queuedBrain = d;
+            if (d.action === 'keys') openKeys();
           } else if (d.type === 'council') {
             d.members.forEach((id, k) => setTimeout(() => beams.push({ from: S.active, to: id, life: 1.6 }), k * 150));
           } else if (d.type === 'done') {
@@ -513,13 +743,28 @@
     } catch (e) {
       addMsg('err', 'System', 'Lost connection to the HUD server. Is it running?');
     }
-    if (finalText) { history.push({ role: 'user', content: text }, { role: 'assistant', content: finalText }); }
+    if (finalText && !extra) { history.push({ role: 'user', content: text }, { role: 'assistant', content: finalText }); }
     busy = false;
     speakingId = null;
     if (!speaking) setState(wakeOn ? 'idle' : 'idle');
     refreshState();
+    if (queuedAgent) { const d = queuedAgent; queuedAgent = null; agentOp(d); }
+    if (queuedBrain) { const d = queuedBrain; queuedBrain = null; runBrain(d); }
+    if (queuedStep) {                                   // run it on your computer, then explain the result
+      const step = queuedStep; queuedStep = null;
+      const r = await handsRun(step);
+      if (r) send('result', { hands_result: r });
+    }
   }
   $('#form').addEventListener('submit', e => { e.preventDefault(); send($('#input').value); });
+  // voice first: the typing box stays hidden until the keyboard button or the first letter typed (outside other fields)
+  function setTyping(on) { $('#form').classList.toggle('typing', on); if (on) $('#input').focus(); }
+  $('#kbd').addEventListener('click', () => setTyping(!$('#form').classList.contains('typing')));
+  $('#input').addEventListener('blur', () => { setTimeout(() => { if (!$('#input').value && document.activeElement !== $('#input')) setTyping(false); }, 200); });
+  addEventListener('keydown', e => {
+    if ($('#form').classList.contains('typing') || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || /^(input|textarea|select)$/i.test(document.activeElement.tagName)) return;
+    setTyping(true);
+  });
 
   // ------------------------------------------------------------------ voice out (text-to-speech)
   const synth = window.speechSynthesis;
@@ -537,6 +782,31 @@
   const plain = s => s.replace(/```[\s\S]*?```/g, ' code block on screen. ').replace(/[*_#>`~|]/g, '').replace(/\[(.*?)\]\(.*?\)/g, '$1').replace(/\s+/g, ' ').trim();
   let engine = store.get('engine', 'browser'), studioVoice = store.get('studioVoice', 'bm_george'), studio = { online: false, voices: [] };
   let studioAudio = null, studioAnalyser = null, studioData = null, ttsLevel = 0;
+  // ---- two assistants, Jarvis and Sophia: each keeps her/his own voice (and the server keeps each one's model)
+  let assistant = store.get('assistant', 'jarvis');
+  function saveVoiceFor() { store.set('voice.' + assistant, { engine, studioVoice, voiceName }); }
+  function defaultVoiceFor(name) {
+    // default to voices that cost nothing: Kokoro (if running) or the browser's own; cloud voices only when Mark picks them
+    const local = studio.online ? studio.voices.filter(v => !v.cloud) : [];
+    if (name !== 'sophia') { const g = local.find(v => v.id === 'bm_george') || local.find(v => v.gender === 'male'); return { engine: g ? 'studio' : 'browser', studioVoice: g ? g.id : 'bm_george', voiceName: null }; }
+    const sv = local.find(v => v.id === 'af_heart') || local.find(v => v.gender === 'female');
+    const sys = synth ? synth.getVoices().find(v => kindOf(v) === 'female' && /^en/i.test(v.lang)) : null;
+    return { engine: sv ? 'studio' : 'browser', studioVoice: sv ? sv.id : 'af_heart', voiceName: sys ? sys.name : null };
+  }
+  function brand() {
+    const n = document.querySelector('.brand-name'); if (n) n.textContent = assistant === 'sophia' ? 'S.O.P.H.I.A' : 'J.A.R.V.I.S';
+    document.body.dataset.assistant = assistant; document.title = assistant === 'sophia' ? 'Sophia · Jarvis OS' : 'Jarvis OS';
+  }
+  function applyAssistant(name) {
+    if (!name || name === assistant) { brand(); return; }
+    saveVoiceFor(); assistant = name; store.set('assistant', name);
+    const v = store.get('voice.' + name, null) || defaultVoiceFor(name);
+    engine = v.engine; studioVoice = v.studioVoice; voiceName = v.voiceName; voice = null;
+    if (engine === 'studio' && !studio.online) engine = 'browser';
+    store.set('studioVoice', studioVoice); if (voiceName) store.set('voiceName', voiceName); store.set('engine', engine);
+    pickVoice(); brand(); renderVoices();
+  }
+  const myName = () => S.assistantLabel || (assistant === 'sophia' ? 'Sophia' : 'Jarvis');
   async function loadStudioVoices() {
     try { studio = await (await fetch('/api/voices')).json(); } catch { studio = { online: false, voices: [] }; }
     if (!studio.online && engine === 'studio') engine = 'browser';
@@ -559,7 +829,8 @@
     if (engine !== 'studio' && !synth) return;
     const parts = plain(text).match(/[^.!?]+[.!?]*\s*/g) || [];
     let chunk = '';
-    for (const p of parts) { if ((chunk + p).length > 220) { speechQueue.push(chunk); chunk = ''; } chunk += p; }
+    const limit = engine === 'studio' && /^fish_/.test(studioVoice) ? 1200 : 220;   // cloud voices: one request per reply (daily limit)
+    for (const p of parts) { if ((chunk + p).length > limit) { speechQueue.push(chunk); chunk = ''; } chunk += p; }
     if (chunk.trim()) speechQueue.push(chunk);
     // studio voices: start generating audio for every chunk right away so playback is gapless
     if (engine === 'studio') speechQueue = speechQueue.map(c => typeof c === 'string' ? { text: c, audio: studioFetch(c).catch(() => null) } : c);
@@ -614,7 +885,7 @@
         b.querySelector('.n').textContent = v.name;
         b.querySelector('.l').textContent = `${v.accent} · ${v.gender}${v.grade ? ' · grade ' + v.grade : ''}`;
         b.title = v.id;
-        b.addEventListener('click', () => { engine = 'studio'; studioVoice = v.id; store.set('engine', engine); store.set('studioVoice', v.id); renderVoices(); stopSpeaking(); speakText("Voice selected. Hello, I'm Jarvis."); });
+        b.addEventListener('click', () => { engine = 'studio'; studioVoice = v.id; store.set('engine', engine); saveVoiceFor(); store.set('studioVoice', v.id); renderVoices(); stopSpeaking(); speakText(`Voice selected. Hello, I'm ${myName()}.`); });
         b.addEventListener('mouseenter', () => fx('tick'));
         list.appendChild(b);
       }
@@ -635,12 +906,73 @@
       const k = kindOf(v);
       b.querySelector('.l').textContent = [v.lang, k !== 'other' ? k : '', NATURAL.test(v.name) ? 'natural' : '', v.localService ? 'offline' : 'online'].filter(Boolean).join(' · ');
       b.title = v.name;
-      b.addEventListener('click', () => { voice = v; voiceName = v.name; store.set('voiceName', v.name); engine = 'browser'; store.set('engine', engine); renderVoices(); stopSpeaking(); speakText("Voice selected. Hello, I'm Jarvis."); });
+      b.addEventListener('click', () => { voice = v; voiceName = v.name; store.set('voiceName', v.name); engine = 'browser'; store.set('engine', engine); saveVoiceFor(); renderVoices(); stopSpeaking(); speakText(`Voice selected. Hello, I'm ${myName()}.`); });
       b.addEventListener('mouseenter', () => fx('tick'));
       list.appendChild(b);
     }
     const total = synth.getVoices().length;
     $('#vp-note').textContent = (studio.online ? `${studio.voices.length} studio + ` : '') + (total ? `${total} system voices` : 'system voices load on first use');
+  }
+  // ---- laptop control: the helper (control/jarvis_control.py) runs on the laptop at 127.0.0.1:3002
+  const CONTROL_URL = 'http://127.0.0.1:3002';
+  let ctrlOn = false, ctrlPoll = null, ctrlSeen = '';
+  async function ctrlFetch(path, body) {
+    const r = await fetch(CONTROL_URL + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Jarvis': '1' }, body: JSON.stringify(body) } : {});
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j;
+  }
+  function ctrlFail(e) {
+    const msg = /fetch|network|load/i.test(e.message) ? "The laptop control helper isn't running. On your laptop run: control/install.sh" : 'Laptop control: ' + e.message;
+    addMsg('jarvis err', 'Jarvis', msg); speakText(msg); setControl(false);
+  }
+  function controlCmd(d) {
+    if (!d.on) { ctrlFetch('/stop', {}).catch(() => {}); setControl(false); return; }
+    setControl(true);
+    if (d.direct) ctrlFetch('/do', d.direct).catch(ctrlFail);
+    else if (d.task) { ctrlSeen = ''; ctrlFetch('/task', { goal: d.task }).catch(ctrlFail); }
+    else ctrlFetch('/status').then(s => { if (s.problem) ctrlFail(new Error(s.problem)); }).catch(ctrlFail);
+  }
+  function setControl(on) {
+    ctrlOn = on; document.body.classList.toggle('control-on', on);
+    $('#ctrl-banner').hidden = !on;
+    if (on && !ctrlPoll) ctrlPoll = setInterval(pollControl, 900);
+    if (!on && ctrlPoll) { clearInterval(ctrlPoll); ctrlPoll = null; }
+    if (on) fx('route');
+  }
+  async function pollControl() {
+    try {
+      const s = await ctrlFetch('/status');
+      $('#ctrl-step').textContent = s.active ? `STEP ${s.step}` : 'READY';
+      $('#ctrl-thought').textContent = s.active ? (s.thought || s.action || 'Working…') : 'Waiting for your order · say what to do';
+      const fin = s.error ? 'ERR:' + s.error : s.done;
+      if (!s.active && fin && fin !== ctrlSeen) {
+        ctrlSeen = fin;
+        if (s.error) { addMsg('jarvis err', 'Jarvis', 'Laptop control: ' + s.error); }
+        else { addMsg('jarvis', 'Jarvis', s.done); speakText(s.done); }
+      }
+    } catch { $('#ctrl-thought').textContent = 'Helper not reachable'; }
+  }
+  $('#ctrl-stop').addEventListener('click', () => send('stop control'));
+
+  // ---- black hole play bar
+  let playTool = null, playOpen = false;
+  function setupPlay() {
+    const bar = $('#play-bar'), btn = $('#t-play'), tools = bar.querySelectorAll('[data-tool]');
+    const pick = id => { playTool = id; tools.forEach(b => b.classList.toggle('on', b.dataset.tool === id));
+      $('#pb-hint').textContent = id ? `Click in space to throw ${id === 'light' ? 'light' : 'a ' + id} · drag to turn` : 'Pick something, then click in space · drag to turn'; };
+    const open = on => { playOpen = on; bar.hidden = !on; btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', on); if (!on) pick(null); else if (!playTool) pick('light'); };
+    btn.addEventListener('click', () => { fx('click'); open(bar.hidden); });
+    tools.forEach(b => b.addEventListener('click', () => { fx('click'); pick(b.dataset.tool); }));
+    $('#pb-clear').addEventListener('click', () => { fx('click'); window.JarvisScene?.play?.('clear'); });
+    bar.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => { fx('click');
+      bar.querySelectorAll('[data-view]').forEach(x => x.classList.toggle('on', x === b)); window.JarvisScene?.setView?.(b.dataset.view); }));
+    const dens = $('#pb-density'); dens.value = store.get('density', 1);
+    const applyDens = () => window.JarvisScene?.setDensity?.(+dens.value);
+    dens.addEventListener('input', () => { store.set('density', +dens.value); applyDens(); });
+    addEventListener('load', () => setTimeout(applyDens, 500)); setTimeout(applyDens, 1500);
+  }
+  function playStats(st) {
+    const el = $('#pb-stats'); if (!el || $('#play-bar').hidden) return;
+    el.textContent = `MASS ${st.mass.toFixed(2)} · FED ${st.fed} · IN FLIGHT ${st.particles}${st.feed > 0.15 ? ' · JETS ACTIVE' : ''}`;
   }
   function setupVoiceStudio() {
     const panel = $('#voice-panel'), btn = $('#t-voices');
@@ -659,6 +991,7 @@
     if (!synth) $('#vp-note').textContent = 'This browser has no speech voices.';
   }
   setupVoiceStudio();
+  setupPlay();
   if (synth) { pickVoice(); synth.onvoiceschanged = pickVoice; }
   loadStudioVoices();
 
@@ -672,12 +1005,12 @@
     if (studio.online) {
       const pool = studio.voices.filter(v => (!want || v.gender === want) && (!accent || v.accent === accent));
       pick = studio.voices.find(v => words.some(w => v.name.toLowerCase() === w || v.id === w)) || (words.length ? null : pool[0]) || null;
-      if (pick) { engine = 'studio'; studioVoice = pick.id; store.set('engine', engine); store.set('studioVoice', pick.id); }
+      if (pick) { engine = 'studio'; studioVoice = pick.id; store.set('engine', engine); saveVoiceFor(); store.set('studioVoice', pick.id); }
     }
     if (!pick && synth) {
       const vs = synth.getVoices();
       const sys = vs.find(v => words.some(w => v.name.toLowerCase().includes(w))) || (words.length ? null : vs.find(v => (!want || kindOf(v) === want) && (!accent || (accent === 'British' ? /en-GB/i : /en-US/i).test(v.lang))));
-      if (sys) { pick = { name: sys.name }; voice = sys; voiceName = sys.name; engine = 'browser'; store.set('voiceName', sys.name); store.set('engine', engine); }
+      if (sys) { pick = { name: sys.name }; voice = sys; voiceName = sys.name; engine = 'browser'; store.set('voiceName', sys.name); store.set('engine', engine); saveVoiceFor(); }
     }
     renderVoices();
     const msg = pick ? `Voice changed to ${pick.name.replace(/^(Microsoft|Google)\s+/, '').replace(/\s*-.*$/, '')}. How do I sound?` : `I couldn't find a voice like "${query}". Open Voices to see them all.`;
@@ -744,10 +1077,13 @@
     rec.lang = navigator.language || 'en-US'; rec.interimResults = false; rec.continuous = true;
     rec.onresult = e => {
       const text = e.results[e.results.length - 1][0].transcript.trim();
-      const m = text.match(/\bjarvis\b[\s,.!?]*(.*)$/i);
+      const m = text.match(/\b(jarvis|sophia)\b[\s,.!?]*(.*)$/i);          // either name wakes her/him up
       if (!m) return;
       stopRec();
-      if (m[1] && m[1].length > 2) send(m[1]); else { chime(880, 1180); startListening(); }
+      const who = m[1].toLowerCase();
+      if (m[2] && m[2].length > 2) send(`${who}, ${m[2]}`);
+      else if (who !== assistant) send(who);
+      else { chime(880, 1180); startListening(); }
     };
     rec.onend = () => { rec = null; recMode = null; if (wakeOn) setTimeout(startWake, 400); };
     rec.onerror = e => { if (e.error === 'not-allowed') { wakeOn = false; updateToggles(); } };
@@ -760,7 +1096,7 @@
   document.addEventListener('keydown', e => {
     if (e.key === '/' && document.activeElement !== $('#input')) { e.preventDefault(); $('#input').focus(); }
     if (e.code === 'Space' && e.ctrlKey) { e.preventDefault(); mic.click(); }
-    if (e.key === 'Escape') { stopSpeaking(); stopRec(); setState('idle'); }
+    if (e.key === 'Escape') { stopSpeaking(); stopRec(); setState('idle'); if (ctrlOn) send('stop control'); }
   });
 
   // ------------------------------------------------------------------ toggles
@@ -777,12 +1113,14 @@
     if (announce) { const m = on ? 'Holographic systems online.' : 'Holograms offline.'; addMsg('sys', 'Jarvis', m); speakText(m); }
   }
   $('#t-holo').addEventListener('click', () => setHolo(!holoOn, false));
-  const SCENE_NAMES = { auto: 'Auto core', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit Sphere', pulse: 'Pulse Sphere', plasma: 'Plasma Orb', portal: 'Warp Portal', liquid: 'Liquid Glass', reactor: 'Reactor', brain: 'Neural Brain', stream: 'Data Stream' };
-  const SCENE_SHORT = { auto: 'Auto', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit', pulse: 'Pulse', plasma: 'Plasma', portal: 'Portal', liquid: 'Liquid', reactor: 'Reactor', brain: 'Brain', stream: 'Stream' };
-  const HOME_OK = ['blackhole', 'sun', 'circuit', 'pulse', 'plasma', 'portal', 'liquid', 'reactor'];
+  const SCENE_NAMES = { auto: 'Auto core', blackhole: 'Black Hole', sun: 'Sun', plasma: 'Plasma Orb', portal: 'Warp Portal', liquid: 'Liquid Glass', bloom: 'Bloom', reactor: 'Reactor', brain: 'Neural Brain' };
+  const SCENE_SHORT = { auto: 'Auto', blackhole: 'Black Hole', sun: 'Sun', plasma: 'Plasma', portal: 'Portal', liquid: 'Liquid', bloom: 'Bloom', reactor: 'Reactor', brain: 'Brain' };
+  const HOME_OK = ['blackhole', 'sun', 'plasma', 'portal', 'liquid', 'bloom', 'reactor', 'brain'];
+  const RETIRED = { circuit: 'plasma', pulse: 'liquid', stream: 'brain' };    // removed Nov 22 (looked muddy); old choices map here
   function setScene(name, announce) {
+    name = RETIRED[name] || name;
     if (!SCENE_NAMES[name]) return;
-    sceneName = name; store.set('scene2', name);
+    sceneName = name; store.set('scene2', name); document.body.dataset.scene = name;
     if (HOME_OK.includes(name)) { homeCore = name; store.set('home', name); }
     const b = $('#t-scene'); decipher(b, '◐ ' + SCENE_SHORT[name], 400); b.classList.toggle('on', true);
     fx('route');
@@ -810,8 +1148,8 @@
   $('#t-voice').addEventListener('click', () => { voiceOn = !voiceOn; store.set('voice', voiceOn); if (!voiceOn) stopSpeaking(); updateToggles(); });
   $('#t-wake').addEventListener('click', () => {
     if (!SR) { addMsg('sys', 'Jarvis', 'Wake word needs Chrome or Edge.'); return; }
-    wakeOn = !wakeOn; updateToggles();
-    if (wakeOn) { addMsg('sys', 'Jarvis', 'Listening for my name. Say "Jarvis" followed by your request.'); startWake(); } else if (recMode === 'wake') stopRec();
+    wakeOn = !wakeOn; store.set('wake', wakeOn); updateToggles();         // remembered: Mark talks more than he types
+    if (wakeOn) { addMsg('sys', myName(), 'Listening for our names. Say "Jarvis" or "Sophia" followed by your request.'); startWake(); } else if (recMode === 'wake') stopRec();
   });
   $('#t-council').addEventListener('click', () => command({ action: 'council', on: !S.councilMode }).then(updateToggles));
 
@@ -898,10 +1236,36 @@
   window.__jarvis = { send, S };   // handy for testing in the browser console
   // Bridge for the 3D scene (scene3d.js)
   window.JarvisHUD = {
-    getFrame: () => ({ theme: themeName, scene: sceneName, home: homeCore, holo: holoOn, level, uiState, active: S.active, speakingId, flowDir, council: S.council, councilMode: S.councilMode, beams, version: modelsVersion }),
+    playStats, getFrame: () => ({ playTool, playOpen, theme: themeName, scene: sceneName, home: homeCore, holo: holoOn, level, uiState, active: S.active, speakingId, flowDir, council: S.council, councilMode: S.councilMode, beams, version: modelsVersion }),
     models: () => S.models,
     onNodeClick: id => switchTo(id),
     fx: name => fx(name),
   };
+  brand();
+  if (store.get('wake', false) && SR) { wakeOn = true; updateToggles(); setTimeout(startWake, 1500); }   // wake word stays on between visits
   dispatchEvent(new Event('jarvis-ready'));
+
+  // ---- control-room readouts: real data, refreshed a few times a second
+  const t0Up = Date.now(), bars = $('#ro-bars');
+  if (bars) for (let i = 0; i < 24; i++) bars.appendChild(document.createElement('i'));
+  const setGauge = (id, k, txt) => { const c = $(id); if (c) c.style.strokeDashoffset = (163.4 * (1 - Math.max(0, Math.min(1, k)))).toFixed(1); const t = $(id + '-t'); if (t) t.textContent = txt; };
+  function updateReadouts() {
+    if (!$('#ro-core')) return;
+    const sc = sceneName === 'auto' ? `AUTO · ${(SCENE_SHORT[homeCore] || 'CORE').toUpperCase()}` : (SCENE_SHORT[sceneName] || sceneName).toUpperCase();
+    $('#ro-core').textContent = sc;
+    $('#ro-state').textContent = ({ idle: 'STANDBY', listening: 'LISTENING', thinking: 'ROUTING', speaking: 'TRANSMITTING' })[uiState] || uiState.toUpperCase();
+    $('#ro-field').textContent = (level * 9.81).toFixed(2) + ' T';
+    const s = Math.floor((Date.now() - t0Up) / 1000); $('#ro-up').textContent = [s / 3600, s / 60 % 60, s % 60].map(x => String(Math.floor(x)).padStart(2, '0')).join(':');
+    bars && [...bars.children].forEach((b, i) => { const v = levelHist[levelHist.length - 24 + i] || 0; b.style.height = (2 + v * 20).toFixed(0) + 'px'; });
+    const a = S.models.find(m => m.id === S.active);
+    $('#ro-link').textContent = a ? a.label.toUpperCase() : '—';
+    $('#ro-via').textContent = a ? a.group.toUpperCase() : '—';
+    $('#ro-lat').textContent = a && a.status && a.status.ms ? (a.status.ms / 1000).toFixed(2) + ' s' : '—';
+    const inst = S.models.filter(m => m.installed).length, okN = S.models.filter(m => m.status.state === 'ok').length;
+    $('#ro-nodes').textContent = `${okN} OK / ${inst}`;
+    const hex = $('#ro-hex'); if (hex && Math.random() < 0.3) hex.textContent = Array.from({ length: 3 }, () => Array.from({ length: 4 }, () => Math.floor(Math.random() * 65536).toString(16).toUpperCase().padStart(4, '0')).join(' ')).join('\n');
+    setGauge('#g-signal', level, Math.round(level * 100));
+    setGauge('#g-links', inst ? okN / inst : 0, `${okN}/${inst}`);
+  }
+  setInterval(updateReadouts, 250);
 })();

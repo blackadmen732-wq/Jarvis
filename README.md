@@ -24,7 +24,7 @@ Your own AI hub. Switch between **free models**, **paid models** and **your own 
 | Your own models | Runs downloaded or uploaded models on your machine | [ollama/ollama](https://github.com/ollama/ollama) |
 | Jarvis | Always-listening desktop voice assistant (Mac, Windows, Linux) | [isair/jarvis](https://github.com/isair/jarvis) |
 | Router | Lets Claude Code & other coding agents use free, local and uncensored models, with automatic fallback | [Alishahryar1/free-claude-code](https://github.com/Alishahryar1/free-claude-code) |
-| **Jarvis HUD** | Holographic voice interface: talk to Jarvis, see live routes to every model, switch models by voice, run an AI council | Built for this project (`hud/`) |
+| **Jarvis HUD** | Holographic voice interface: talk to Jarvis, see live routes to every model, switch models by voice, run an AI council | Built for this project (`hud/`) on [three.js](https://github.com/mrdoob/three.js) + [pmndrs/postprocessing](https://github.com/pmndrs/postprocessing) |
 
 ![Jarvis HUD in council mode](docs/hud-council.jpg)
 
@@ -47,9 +47,47 @@ You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) insta
    ```bash
    docker compose up -d
    ```
-5. Open **http://localhost:3000** and create your account. The first account becomes the admin.
+   That starts only the light parts: the Jarvis HUD (**http://localhost:3001**), the router, the Lina checker and the local-model engine. **Only what you use runs.** The hub below and the studio voices stay off until you turn them on, so a small laptop doesn't heat up for nothing:
+   ```bash
+   docker compose --profile hub --profile voices up -d
+   ```
+   To keep them on for good, put `COMPOSE_PROFILES=hub,voices` in `.env`. Local models leave memory 2 minutes after their last answer (`OLLAMA_KEEP_ALIVE`).
+5. With the hub on, open **http://localhost:3000** and create your account. The first account becomes the admin.
+   The hub only accepts connections from this computer. To use it from your phone on the same Wi-Fi, make your admin account first, then change `"127.0.0.1:3000:8080"` to `"3000:8080"` in `docker-compose.yml` and run `docker compose up -d`.
 
 **Check it works:** click the model dropdown at the top. You should see a long list of models. Pick one ending in `:free` and say hi.
+
+### Add your API keys without the terminal
+
+Press **Keys** at the bottom of the HUD (or say *"open my keys"*). Paste each key into its box and press **Save keys**. Jarvis Hands writes them into `.env` on your computer and restarts the model router, so they work about 30 seconds later. Each box has a **get a key ↗** link:
+
+| Key | Where | Cost |
+|---|---|---|
+| Groq | console.groq.com/keys | free |
+| OpenRouter | openrouter.ai/keys | free models free; Grok and Claude need credit |
+| Gemini | aistudio.google.com/apikey | free, about 20 a day |
+| NVIDIA | build.nvidia.com → API Keys | free |
+
+Keys stay on your computer: they're never shown again in the HUD, never synced to Supabase and never sent to Claude or GitHub. (Needs Jarvis Hands, which the Jarvis app icon starts for you.)
+
+### Make Jarvis an app (no terminal after this)
+
+Run this **once**:
+```bash
+./scripts/install-app.sh
+```
+A **Jarvis** app appears in your app launcher (on a Chromebook: in the **Linux apps** folder). Right-click it → **Pin to shelf**. From then on, click the icon: it starts Jarvis and Jarvis Hands in the background if they aren't running, waits until Jarvis is ready, and opens it, already connected to Hands (no pairing code to type). If anything goes wrong, the details are in `~/.jarvis-hands/launch.log`. To remove the icon: `./scripts/install-app.sh remove`.
+
+Want it in its own window instead of a browser tab? In Chrome, click the **Install** icon in the address bar (or **⋮ → Cast, save and share → Install page as app**).
+
+### Updates and your data on a new computer
+
+**Automatic updates:** every time you open the Jarvis app, it checks GitHub. If `main` has something new, it downloads it, rebuilds and restarts by itself ("Updating Jarvis…"). It only follows `main` (finished work). If you were on a branch that has since been merged, it moves you to `main`. If you changed files yourself, it leaves them alone and doesn't update.
+
+**Sync with Supabase (your data follows you):** your agents and their run history, Lina rules, Jarvis/Sophia settings and models, and your voice, theme and eco choices are kept in your Supabase project, in a separate `jarvis` section the trading bot never touches. On a new computer: install Jarvis, put the same `JARVIS_SYNC_TOKEN` in `.env`, open the app, and everything comes back. The newest copy always wins.
+- Turn it on: make a long random value (`openssl rand -hex 24`), save it in Supabase as the secret `JARVIS_SYNC_TOKEN` (Project Settings → Edge Functions → Secrets), and put the same value in `.env` as `JARVIS_SYNC_TOKEN=`. Then restart Jarvis.
+- **Not synced, on purpose:** your API keys (type them again on a new computer), the Hands pairing code, and downloaded local models (too big).
+- Without the token, everything simply stays on this computer.
 
 ## 2. Switch models
 
@@ -139,6 +177,8 @@ The hub ships with a dark navy + cyan theme ([`theme/custom.css`](theme/custom.c
 
 ## 5. Create the "Jarvis" personality
 
+> The HUD has its own personality switch: **Grok mode** (the default, [`jarvis/jarvis-persona-grok.md`](jarvis/jarvis-persona-grok.md): witty, blunt, answers the questions other assistants dodge, no lectures) and **serious mode** ([`jarvis/jarvis-persona.md`](jarvis/jarvis-persona.md)). Say *"Grok mode"* or *"serious mode"*. Edit either file to change how Jarvis talks, then `docker compose restart hud`. The steps below set up the personality for the hub and the desktop app.
+
 This makes a model called **jarvis** that every app (including the voice assistant) can use.
 
 1. In the hub: **Workspace → Models → +**.
@@ -224,8 +264,8 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 - **Comms Log** (right): the conversation, including who said what.
 
 **Talking to it:**
-- Tap the **mic** (or press Ctrl+Space), speak, and it sends when you stop.
-- Turn on **Wake word** and just say *"Jarvis, …"* any time (the tab must stay open).
+- **Voice first:** the dock is just the mic. Tap it (or press Ctrl+Space), speak, and it sends when you stop. To type instead, press the ⌨ button or simply start typing anywhere; the box closes again when it's empty.
+- Turn on **Wake word** and just say *"Jarvis, …"* or *"Sophia, …"* any time (the tab must stay open). It stays on next time you open the HUD.
 - **Voice** on/off controls whether Jarvis speaks replies out loud.
 - **Voices ▾** opens the **Voice Studio**:
   - **Studio voices** (top): 55 natural voices (30 female, 25 male; American, British, Spanish, French, Italian, Hindi, Japanese, Portuguese, Mandarin), made on your computer by the free Kokoro engine (the `voice` service). Sorted best-quality first. With these, the reactor pulses to the *real* sound of the voice. Hear 4 of them: [`docs/voice-samples.mp3`](docs/voice-samples.mp3). Play with all of them at http://localhost:8880/web.
@@ -238,18 +278,36 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
   | Jarvis is… | Core becomes |
   |---|---|
   | idle | your **home core** (Black Hole unless you pick another) |
-  | listening to you | **Pulse Sphere**: glowing spikes rippling with your voice |
+  | listening to you | **Liquid Glass**: a shimmering glass blob |
   | thinking / routing | **Warp Portal**: data streaks rushing into a glowing ring |
   | speaking | **Plasma Orb**: bright heart with electric veins |
-  | council speaking | **Liquid Glass**: a shimmering glass blob |
+  | council speaking | **Neural Brain**: many minds at work |
 
-  You can also lock any core: **Black Hole** (real light-bending, glowing accretion disk, planets orbiting, your models circle it like satellites), **Sun** (boiling surface, bright limb, looping prominences), **Circuit Sphere**, **Pulse**, **Plasma**, **Portal**, **Liquid**, **Reactor**, **Neural Brain**, **Data Stream**. Say *"black hole mode"*, *"plasma core"*, *"make the core a sun"*, or *"auto mode"* to go back. The last core you lock becomes the idle core in Auto.
+  You can also lock any core: **Bloom** (thousands of shimmering fibres forming slowly turning petals), **Black Hole** (real light-bending, glowing accretion disk, planets orbiting, your models circle it like satellites), **Sun** (boiling surface, bright limb, looping prominences), **Plasma**, **Portal**, **Liquid**, **Reactor**, **Neural Brain**. (Circuit, Pulse and Data Stream were removed because they looked muddy; saying their names picks the closest core that's left.) Say *"black hole mode"*, *"plasma core"*, *"make the core a sun"*, or *"auto mode"* to go back. The last core you lock becomes the idle core in Auto.
 - **● Colour** cycles the theme: Amber, Ice (blue), Violet, Crimson, Emerald, Gold. Everything follows: core, disk, sun, panels. Or say *"change colour to blue"*.
 - **The live connection to your active model:**
   - warm colours (Amber, Gold, Crimson): a **solar flare** rises from the core, arcs out and loops around the model you're using. Switch models and a new flare grows toward the new one.
   - cool colours (Ice, Violet, Emerald): crackling **plasma lightning** from the core to the model.
   - the Neural Links panel marks it **⚡ linked** with a moving plasma bar.
-- **Holo** shows/hides the holographic layer: gear-toothed machine rings turning around the core, wireframe drones orbiting and firing scan beams, and a radar sweep on the floor. Say *"hide the holograms"* / *"show the holograms"*.
+  - the Comms Log shows a **LINK TRANSFER** card: FROM model → TO model, provider, LOCAL/CLOUD and FREE/PAID tags, the exact model ID, then **LINKED · latency** after its first reply.
+- **The backdrop is the real Milky Way** (ESO's panorama photo), colour-graded into deep blues and violets, with three layers of twinkling stars, soft nebula colour and a big **ringed planet**. **Move your mouse** and the layers shift at different depths. In Black Hole mode the sky dims (space around a black hole is dark) and the hole draws its matter, shadow and photon rings on top without warping the sky.
+- **The black hole:** a big, thick disk of glowing gas swirling inward (inner gas orbits faster), soft hot gas above and below it, relativistic beaming (the side coming at you is brighter), a sharp photon ring, and three planets on their own tilted orbits. Anything that passes behind the hole really disappears behind it. If your computer is slow, it lowers its own resolution automatically to stay smooth.
+- **Play with the black hole** (the **✦ Play** button, in Auto or Black Hole mode):
+  - pick **Light**, **Gas**, **Star** or **Planet**, then click anywhere in space to throw it in:
+    - **Light** fires a beam of light rays that bend around the hole. Some loop round it, the rest fall in (same physics as the picture).
+    - **Gas** is a cloud that spirals in, heats from red to white-hot and feeds the disk.
+    - **Star** and **Planet** dive in and get stretched into a long stream by the tides before they fall in.
+  - **grab anything that orbits** (the planets, the wireframe drones, or something you threw), drag it and let go: it flies off with your swipe. A new planet or drone forms a few seconds later.
+  - feeding it makes the disk flare, fires **jets** from the poles, and makes the hole slightly heavier and bigger (MASS in the bar). **Clear** resets everything.
+  - **View**: *Wide* (see everything), *Close* (fly in near the disk), *Follow* (ride along with the last thing you threw). Drag to turn and scroll to zoom at any time.
+  - **Plasma** slider: from a thin disk to a dense, blazing one.
+  - while Play is open, the black hole stays on screen even when Jarvis talks.
+
+![Play: light rays bending round the hole, a gas cloud falling in](docs/hud-play-light.jpg)
+![Close view, Plasma turned up, a gas cloud stretched into a stream](docs/hud-play-dense.jpg)
+- **Gravity:** every model orbits the core on its own path (faint orbit lines); closer ones move faster, like real planets. The linked model's orbit glows.
+- **Control-room readouts** around the core show live data: core form and state, the linked model and provider, latency, how many links work, uptime, and Signal / Links gauges.
+- **Holo** shows/hides the holographic layer: gear-toothed machine rings turning around the core, wireframe drones orbiting (grab one and throw it into the black hole), and a radar sweep on the floor (when the floor shows). Say *"hide the holograms"* / *"show the holograms"*.
 
 ![Black hole with a solar flare to the active model](docs/hud-blackhole.jpg)
 ![Blue theme: plasma lightning](docs/hud-blackhole-blue.jpg)
@@ -260,13 +318,24 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 |---|---|
 | "Jarvis, switch to Groq" / "use the uncensored model" / "switch to Kimi" | Routes to that model (any name or nickname in `hud/models.json`, or any model the router knows) |
 | "Start the council" / "council off" | Council mode on/off |
+| "Grok mode" / "rebel mode" (default) · "serious mode" | Jarvis's personality: witty, blunt, no lectures · or the calm, polite butler |
+| "Switch to Grok" / "use Grok 4.3" | The real Grok (xAI) through OpenRouter: **paid**, add credit at openrouter.ai first |
 | "Status" | Which model is active, what's online |
 | "List models" | Reads out your models |
 | "Use a female voice" / "switch voice to George" | Changes Jarvis's voice |
-| "Auto mode" / "black hole mode" / "sun mode" / "plasma core" / "circuit sphere" | Change the core |
+| "Auto mode" / "black hole mode" / "sun mode" / "bloom mode" / "plasma core" / "neural brain mode" | Change the core |
 | "Change colour to blue" / "purple theme" | Change the colour theme |
 | "Hide the holograms" / "show the holograms" | Holographic layer on/off |
+| "Throw a star in" / "send light" / "feed it gas" / "drop a planet" / "clear the black hole" | Play with the black hole |
+| "Take control of my laptop" / "take control and open my downloads folder" | Jarvis drives your laptop (section 9) |
+| "Stop" / "release control" (or Esc) | Take your laptop back |
 | "Switch to Qwen 7B" / "use the coder" / "use vision" | Your local uncensored models |
+| "Lina rule: if we lose 3 in a row, stop until I restart" | Writes it in Lina, checks it, tells you what it means (see section 9) |
+| "Confirm" / "cancel" | Save or discard the Lina rule Jarvis just checked |
+| "List my Lina rules" | Reads your saved rules |
+| "How did the bots do?" / "bot report" | Last night's Edge Bot training results (read-only, paper money) |
+| "Computer, how much disk space do I have?" / "run git status" / "open youtube" | Jarvis Hands: runs ONE step on your computer and explains the result (see section 11) |
+| "Create an agent called scout that …" / "ask scout to …" / "list my agents" | Your team of agents (see section 12) |
 | Anything else | Answered by the active model (or the council) |
 
 **Council mode (AIs talking to each other):** the council members answer one after another. Each sees what the others said and agrees, adds or disagrees by name. Then Jarvis (your active model) gives the final verdict, which is the part spoken out loud. Default council: Nemotron Ultra + GPT-OSS (Groq) + Qwen (Cerebras); a full round takes about 4 seconds. Each round uses one request per member + one for the verdict.
@@ -277,7 +346,144 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 
 ![Jarvis HUD on a phone](docs/hud-phone.jpg)
 
+**Safety:** the HUD only answers pages opened on this computer (`localhost:3001` or `127.0.0.1:3001`). Other websites you visit can't use it to switch models or spend your credit. To open it under another name, add it as `HUD_ALLOWED_HOSTS=name:3001` under `hud` → `environment` in `docker-compose.yml`.
+
 > **Privacy note:** Chrome and Edge send your *speech audio* to Google/Microsoft to turn it into text. The words Jarvis speaks back are made on your computer. If you want 100% offline voice, use the Jarvis desktop app (section 6) with your local model.
+
+### Auto Router: the right free model for every request (the default)
+
+Jarvis doesn't make you pick a model. The **Auto Router** looks at each request, works out the job (**quick** chat, **code**, **reason**ing and maths, **long** documents, **creative** writing), and ranks the free models that are good at that job by how fast and reliable they've actually been for you. Then it **races the best two**: it asks the best one, and if that one hasn't started answering within about 2 seconds (busy, rate-limited, slow), it asks the second as well. Whichever answers first wins and the other is cancelled. A model that fails or is slow drops down the list by itself.
+- The answer shows who won and why, e.g. *"Gemma 4 31B · auto: creative"*.
+- Say *"switch to Groq"* (or any model) to pick one yourself; *"switch to auto router"* to go back.
+- Free models it uses (each needs its provider's key in `.env`): GPT-OSS on Groq, Qwen on Cerebras, Nemotron and Kimi on NVIDIA, Gemini Flash, and on OpenRouter: **ERNIE 5.5 Flash** (reads up to 1 million tokens: long documents), **Gemma 4 31B** and **Gemma 4 26B Fast**, plus OpenRouter's free picker. Edit the `jobs` of any model in `hud/models.json` to change what it's used for. Paid models (Grok, Claude) are only used when you pick them, or with `"allow_paid": true`.
+
+**Free limits (checked Nov 22, 2026)**, which the router respects (`daily_limits` in `hud/models.json`): OpenRouter's free models share **50 requests a day** (1,000 a day forever after a one-time $10 credit; then set `"open_router": 1000`), Groq about 1,000 a day, Gemini about 20 a day (so it's only used for long documents), NVIDIA about 40 a minute. **Cerebras is no longer free** (since July 2026), so the router only uses it if you pick it. Jarvis counts every request, saves the best providers for when they matter, and stops using one before it runs out. Say *"status"* to hear today's counts.
+
+**Cloud voices (optional):** with an OpenRouter key, the Voice Studio also offers **Jarvis** and **Sophia** voices from Fish Audio's free model, described in words in `hud/models.json` (`"tts"`). They sound natural and need nothing installed, which suits a Chromebook, but each spoken reply uses one of OpenRouter's daily free requests. Chrome's own voices stay free and unlimited, and they're the default.
+
+### Sophia and Jarvis: two assistants
+
+Jarvis has a partner: **Sophia**. Same Grok-style personality ([`jarvis/sophia-persona.md`](jarvis/sophia-persona.md)), her own female voice, and her own model.
+- Say **"Sophia"** (or *"Sophia, what's the weather like on Mars?"*) and she answers; the header turns to **S.O.P.H.I.A**. Say **"Jarvis"** to switch back. *"Talk to Sophia"* and *"switch to Jarvis"* work too, and with the wake word on, both names wake the HUD.
+- Each one **remembers her/his own model and voice**: switch Sophia to Grok and Jarvis to a local model, and each keeps it. Pick her voice in **Voices ▾** while she's active (default: Kokoro's `af_heart` with studio voices on, otherwise your computer's first female voice).
+- "Serious mode" works for both.
+
+### Eco mode: no overheating
+
+The HUD works like a game's graphics settings. On a Chromebook, or any computer with 4 GB of RAM or 4 cores, it picks **eco** by itself: 30 frames a second, lighter glow, no film grain, the smaller sky picture. Everywhere it caps the frame rate, drops to a trickle after 20 seconds of nothing happening, stops completely when the tab is hidden, and lowers its resolution while frames run late. Hidden cores use no graphics power at all.
+- Say *"eco mode"* / *"battery mode"*, *"high quality"*, or *"auto quality"* (the page reloads in about 5 seconds). Or open `http://localhost:3001/?eco`.
+
+## 9. Lina: rules for your bots, by voice
+
+Lina Sigra is a small language for bot rules. Every rule is checked word by word, and it can only make a bot *more careful*: pause, stop, watch, ask you, or run the approved paper rule at full, half or quarter size. Money words (`moni`, `paga` pay, `vori` buy, `sori` sell, `dela` give, `toma` take, `valida` approve) are always refused.
+
+1. Say (or type): *"Jarvis, Lina rule: if risk is above 0.8, pause for 10 days."*
+2. The **Lina writer** model writes `se risk es alta 0.8: na va pausa 10 dia`. If the checker rejects its first try, it gets one more try with the reason.
+3. Jarvis tells you what the checked rule means in plain English.
+4. Say **"confirm"** to save it (or **"cancel"**). Saved rules are in `rules.lina` inside the HUD's data volume, with the English meaning and a fingerprint.
+
+You can also type Lina directly: *"Lina se fila de tri mala: na va halta"* (three losses in a row: stop until you restart).
+
+- **Which model writes Lina:** `"lina_writer"` in `hud/models.json` (default: GPT-OSS on Groq). When the trained Lina model is ready, it goes here.
+- **The checker** is the `lina` service: the same Lina engine as Edge Bot, with no port on your computer. Update it with `./scripts/update-lina.sh <path to your edge-bot folder>`.
+- **Edge Bot report:** *"How did the bots do?"* reads the public, read-only training summary. No key needed.
+
+## 10. Lite mode (Chromebook, 4–8 GB RAM)
+
+```bash
+./scripts/lite.sh          # HUD + router + Lina + local engine, no hub and no studio voices
+./scripts/lite.sh small    # same, and download the 2 GB uncensored model (8 GB RAM)
+./scripts/lite.sh stop
+```
+Open **http://localhost:3001/?2d** for the lighter 2D HUD. You need at least one free cloud key in `.env` (Groq is fast). On a Chromebook, turn on Linux first (Settings → About ChromeOS → Developers) and give it at least 20 GB of disk.
+
+## 11. Jarvis Hands: let Jarvis use your computer
+
+Jarvis lives in Docker, which can't reach your computer. **Jarvis Hands** is a small helper you run on the computer itself (it needs [Node.js](https://nodejs.org) 18 or newer, nothing else).
+
+1. In this folder, start it (leave the window open):
+   ```bash
+   node hands/hands.js
+   ```
+   Commands start in `~/jarvis-workspace`. To work in another folder: `node hands/hands.js ~/projects`.
+2. It prints a pairing code. In the HUD, type: `hands code <the code>`.
+3. Ask: *"Computer, how much disk space do I have?"*, *"run git status"*, *"open youtube"*.
+4. Jarvis works out the command, runs it straight away, shows you the exact command and its real output, and tells you what it means.
+
+**Your rules:** Jarvis runs what it decides, with no built-in blocks. To stop it running certain commands, add your own lines to `LOCKED` at the top of `hands/hands.js`, for example `[/\bsudo\b/i, 'admin rights'],`. Then restart Hands and run `docker compose up -d --build hud`. Commands on your list are refused on your computer and in the HUD.
+
+**What stays on:**
+- **The connection:** Hands listens on 127.0.0.1, only accepts the HUD page and needs the pairing code, so other websites you visit can't send commands to your computer.
+- **The log:** everything is recorded in `~/.jarvis-hands/log.jsonl`.
+- **The off switch:** Ctrl+C in the Hands window, or type `hands disconnect` in the HUD.
+
+---
+
+## 9. Laptop control: Jarvis uses your mouse and keyboard
+
+Say **"Jarvis, take control of my laptop"** and Jarvis drives your real desktop. It looks at the screen, moves your cursor (you can watch it glide), clicks, double-clicks, drags, scrolls, types, presses shortcuts and opens apps, websites and folders. **There is no approval step**: while control is on, everything you say is an order for the laptop.
+
+- **One-shot:** *"take control and open my downloads folder"*, *"take control and search YouTube for lofi music"*.
+- **While in control:** just say the task (*"open Firefox and check the weather"*), or give quick moves with no AI needed: *"scroll down"*, *"type hello world"*, *"press ctrl plus t"*, *"click"*, *"double click"*, *"right click"*.
+- **Taking it back** (always works): say **"stop"** / **"release control"**, press **Esc** in the HUD, click **Stop** on the red **CONTROL ACTIVE** banner, or **push your mouse into the top-left corner** of the screen.
+- The red banner shows each step and what Jarvis is thinking. When it finishes, it says what it did.
+
+**Install (once, on the laptop itself; Linux):**
+
+```bash
+control/install.sh
+```
+
+This installs the tools (xdotool, scrot, ImageMagick), starts the helper and makes it start at every login. The helper listens only on `127.0.0.1:3002` and only accepts requests from the HUD page. It runs on your laptop, not in Docker, because it needs your desktop. Remove it with `control/install.sh remove`.
+
+**Which AI looks at the screen:** Gemini Flash if `GEMINI_API_KEY` is in `.env` (free tier, best at finding buttons), otherwise a free OpenRouter vision model (each step is one of your 50 free requests a day), otherwise your local `qwen3-vl-abliterated` (private, but slow on a CPU). To choose one yourself, set `CONTROL_MODEL` (plus `CONTROL_API_BASE` and `CONTROL_API_KEY`) in `.env`.
+
+> **Use an Xorg session.** Wayland (the default on new Ubuntu) blocks apps from moving the mouse or taking screenshots. On the login screen click the gear icon and choose **"Ubuntu on Xorg"**.
+>
+> **On a Chromebook:** Linux runs in its own box there, so laptop control only sees and drives **Linux apps** (the terminal, Linux Firefox, files in the Linux folder), not ChromeOS or the Chrome browser itself. Jarvis Hands (section 11) works the same way: commands run inside Linux. To let Jarvis use a browser on a Chromebook, install Firefox inside Linux (`sudo apt install firefox-esr`) and ask Jarvis to use that.
+>
+> **Be careful what you ask.** With control on, Jarvis can do anything you can: delete files, send messages, run commands. A log of every step is kept in `~/.local/state/jarvis-control.log`.
+
+## 12. Your own Claude and ChatGPT accounts
+
+A Claude Pro/Max or ChatGPT Plus subscription can't be plugged into other apps (that breaks the companies' rules and can get the account banned). But both companies make their own command-line apps that log in with your subscription: **Claude Code** and **Codex**. Install them once on your computer, and Jarvis uses them through Jarvis Hands:
+
+| Say | What happens |
+|---|---|
+| *"Switch to my Claude"* / *"switch to my ChatGPT"* | Jarvis's answers come from your own account (switch back: *"switch to auto router"*) |
+| *"Ask Claude Code to fix the bug in my website folder"* | Claude Code does the job on your computer, in your Jarvis work folder, and Jarvis reads you the gist |
+| *"Ask my ChatGPT to write a cover letter"* / *"Codex: …"* | Same, with your ChatGPT account through Codex |
+| *"Create an agent called builder that … every day at 9am using Claude Code"* | An agent whose brain is your Claude account (or *"with my ChatGPT"*) |
+
+**Set up once** (in the Linux terminal on a Chromebook):
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+then run `claude` once and log in with your Claude account. For ChatGPT:
+```bash
+sudo apt install -y npm && sudo npm install -g @openai/codex && codex login
+```
+- They use your subscription's own limits. A job can take a minute or more.
+- Claude Code may edit files and run commands in the work folder (`BRAIN_CLAUDE_MODE`, default `acceptEdits`, and `BRAIN_CLAUDE_TOOLS` control what it may do). Codex runs with `exec --full-auto` (`BRAIN_CODEX_ARGS`).
+- Other AI apps you pay for (Grok, Gemini): use their API keys in `.env` instead; their apps can't be connected.
+
+## 13. Agents: your own team of bots
+
+Like Grok Bot's team: each agent has **one job**, works on **your computer** (inside Jarvis Hands) in **its own folder**, and can run on a **routine**. Jarvis is the chief of staff: you talk to Jarvis, Jarvis hands out the work.
+
+| Say | What happens |
+|---|---|
+| "Create an agent called scout that checks my disk space and cleans old downloads every day at 9am" | Hires *scout*: its job, plus a routine (also "every 30 minutes", "every 2 hours", "every morning", "every evening") |
+| "Ask scout to check how much space is left" | Scout works on it by itself, step by step: runs a command, reads the result, decides the next step, up to 12 steps. Each step shows in the Comms Log; Jarvis says the result |
+| "List my agents" / "who is on my team" | The team, their routines and what each did last |
+| "What did scout do" / "scout report" | The last run: task, every command, the result |
+| "Fire scout" | Removes the agent (its folder stays) |
+
+- **Needs Jarvis Hands running** (section 11). Agents keep running their routines while Hands is on, even with the HUD closed; when you open the HUD, Jarvis tells you which routines finished.
+- **Brain:** an agent thinks with the model that was active when you hired it (switch models first to choose). Local models are free and private; cloud ones are faster.
+- **Where things live:** each agent's folder is `~/jarvis-workspace/agents/<name>`, its runs are saved in `~/.jarvis-hands/runs/`, the team in `~/.jarvis-hands/agents.json`.
+- **Your rules** (the `LOCKED` list in `hands/hands.js`) apply to every command an agent runs. Steps per run: `AGENT_MAX_STEPS` (default 12).
+- **Not yet:** app connectors (Gmail, Slack). The video's Grok Bot clone uses Composio for those; that would need a Composio key.
 
 ---
 
@@ -304,3 +510,11 @@ docker compose logs -f open-webui             # see what's going on
 | HUD mic does nothing | Use Chrome or Edge, open it as `http://localhost:3001` (not an IP address), and allow the microphone in the address bar. |
 | HUD shows "Router offline" | `docker compose ps` and `docker compose logs router`. Usually a mistake in `.env`. |
 | A node turns red with "key missing" | Add that provider's key to `.env`, then `docker compose up -d router`. |
+
+---
+
+## Credits
+
+- Milky Way panorama: ESO/S. Brunier, [CC BY 4.0](https://www.eso.org/public/images/eso0932a/) (`hud/public/assets/`)
+- [three.js](https://github.com/mrdoob/three.js) (MIT) and [postprocessing](https://github.com/pmndrs/postprocessing) (zlib), stored in `hud/public/vendor/`
+- Studio voices: [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) (Apache-2.0); router: [free-claude-code](https://github.com/Alishahryar1/free-claude-code) (AGPL-3.0)

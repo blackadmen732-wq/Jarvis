@@ -11,10 +11,20 @@ const ROUTER = (process.env.ROUTER_URL || 'http://127.0.0.1:8082').replace(/\/$/
 const OLLAMA = (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
 const ROUTER_TOKEN = process.env.ROUTER_TOKEN || 'jarvis';
 const KOKORO = (process.env.KOKORO_URL || 'http://127.0.0.1:8880').replace(/\/$/, '');
+const LINA = (process.env.LINA_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
+// Edge Bot's public, read-only training summary (the PARALLAX dashboard feed). No key needed.
+const EDGEBOT = process.env.EDGEBOT_URL || 'https://mhahkbssltukjhusjsjf.supabase.co/functions/v1/parallax-money?view=training';
+// Who may talk to this server: only pages opened from this computer. Add more as HUD_ALLOWED_HOSTS=name:port,...
+const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`,
+  ...String(process.env.HUD_ALLOWED_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean)]);
 const CONFIG_PATH = process.env.HUD_CONFIG || path.join(__dirname, 'models.json');
 const PERSONA_PATH = process.env.PERSONA_PATH || path.join(__dirname, '..', 'jarvis', 'jarvis-persona.md');
+const GROK_PERSONA_PATH = process.env.GROK_PERSONA_PATH || path.join(__dirname, '..', 'jarvis', 'jarvis-persona-grok.md');
+const SOPHIA_PERSONA_PATH = process.env.SOPHIA_PERSONA_PATH || path.join(__dirname, '..', 'jarvis', 'sophia-persona.md');
+const ASSISTANTS = { jarvis: 'Jarvis', sophia: 'Sophia' };     // two assistants, each with her/his own voice and model
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_PATH = path.join(DATA_DIR, 'state.json');
+const RULES_PATH = path.join(DATA_DIR, 'rules.lina');            // Lina rules you confirmed by voice
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // ---------------------------------------------------------------- config/state
@@ -31,14 +41,42 @@ const saved = readJSON(STATE_PATH, {});
 const state = {
   active: saved.active || config.active || (config.models[0] && config.models[0].id),
   councilMode: !!saved.councilMode,
+  personality: saved.personality || config.personality || 'grok',   // 'grok' (witty, blunt, no lectures) or 'classic'
+  assistant: ASSISTANTS[saved.assistant] ? saved.assistant : 'jarvis',  // who is talking: 'jarvis' or 'sophia'
+  activeBy: saved.activeBy || {},                                     // each assistant remembers her/his own model
+  _at: saved._at || null,                                             // when these settings last changed (sync: newest wins)
   council: saved.council || config.council || [],
   extra: saved.extra || [],           // models added by voice ("switch to llama")
 };
-function saveState() {
+let pendingRule = null;               // a checked Lina rule waiting for "confirm"
+// Supabase sync (../hands/sync.js): settings, Lina rules and voice choices follow Mark to any computer
+let sync = null;
+for (const f of ['./sync.js', '../hands/sync.js']) { try { sync = require(f).create({ log: m => console.warn(m) }); break; } catch {} }
+if (!sync) sync = { on: false, status: { on: false }, pull: async () => ({}), push() {}, flush: async () => {} };
+const { newer } = (() => { try { return require('./sync.js'); } catch { try { return require('../hands/sync.js'); } catch { return { newer: () => false }; } } })();
+const SYNCED = s => ({ active: s.active, councilMode: s.councilMode, council: s.council, extra: s.extra, personality: s.personality, assistant: s.assistant, activeBy: s.activeBy });
+let prefs = { value: {}, updated_at: null };          // the browser's choices (voices, theme, eco...), see /api/prefs
+
+function saveState({ quiet = false } = {}) {
   try {
+    if (!quiet) state._at = new Date().toISOString();
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+    if (!quiet) sync.push('hud.state', SYNCED(state), state._at);
   } catch (e) { console.warn('could not save state:', e.message); }
+}
+
+// on start: take whatever is newer, this computer's copy or Supabase's
+async function syncOnStart() {
+  if (!sync.on) return;
+  const got = await sync.pull(['hud.state', 'hud.rules', 'hud.prefs']);
+  const st = got['hud.state'];
+  if (newer(st, state._at)) { Object.assign(state, st.value); state._at = st.updated_at; saveState({ quiet: true }); }
+  else if (state._at) sync.push('hud.state', SYNCED(state), state._at);
+  const ru = got['hud.rules']; let rulesAt = 0; try { rulesAt = fs.statSync(RULES_PATH).mtimeMs; } catch {}
+  if (newer(ru, rulesAt) && typeof ru.value === 'string') { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(RULES_PATH, ru.value); }
+  else if (rulesAt) sync.push('hud.rules', fs.readFileSync(RULES_PATH, 'utf8'), new Date(rulesAt).toISOString());
+  if (got['hud.prefs']) prefs = got['hud.prefs'];
 }
 const status = {};                    // id -> {state, ms, error, at}
 let localModels = [];                 // names from Ollama
@@ -47,8 +85,30 @@ let routerCatalog = { at: 0, ids: [] };
 
 function persona() {
   let p = '';
-  try { p = fs.readFileSync(PERSONA_PATH, 'utf8'); } catch { p = 'You are Jarvis, a calm, witty personal AI assistant.'; }
+  const sophia = state.assistant === 'sophia';
+  const file = sophia && state.personality === 'grok' ? SOPHIA_PERSONA_PATH : state.personality === 'grok' ? GROK_PERSONA_PATH : PERSONA_PATH;
+  try { p = fs.readFileSync(file, 'utf8'); }
+  catch { try { p = fs.readFileSync(PERSONA_PATH, 'utf8'); } catch { p = 'You are Jarvis, a calm, witty personal AI assistant.'; } }
+  if (sophia && file !== SOPHIA_PERSONA_PATH) p = p.replace(/\bJarvis\b/g, 'Sophia');   // serious-mode Sophia
   return p.trim();
+}
+const me = () => ASSISTANTS[state.assistant] || 'Jarvis';
+
+// "Sophia, ..." / "Jarvis, ..." / "talk to Sophia" / "switch to Jarvis": who answers. Each keeps her/his own model.
+function pickAssistant(message) {
+  let m = String(message).match(/^\s*(?:hey |ok |okay |hi |yo )?(jarvis|sophia)\b[\s,:;.!?-]*(.*)$/is);
+  if (m) return { who: m[1].toLowerCase(), rest: m[2].trim() };
+  m = String(message).match(/^\s*(?:switch|change|go|pass me|put me through|give me|let me (?:talk|speak) to|talk to|speak to|i want)(?: (?:back |over ))?(?: to| with)? (jarvis|sophia)[.!?]*\s*$/i);
+  if (m) return { who: m[1].toLowerCase(), rest: '' };
+  return null;
+}
+function setAssistant(who) {
+  if (who === state.assistant) return false;
+  state.activeBy[state.assistant] = state.active;
+  state.assistant = who;
+  if (state.activeBy[who] && byId(state.activeBy[who])) state.active = state.activeBy[who];
+  else if (config[who + '_model'] && byId(config[who + '_model'])) state.active = config[who + '_model'];
+  saveState(); return true;
 }
 
 // ---------------------------------------------------------------- model list
@@ -74,6 +134,128 @@ function allModels() {
   });
 }
 const byId = id => allModels().find(m => m.id === id);
+
+// Who takes over when a model fails: your local model if it's downloaded, otherwise the first free cloud model that
+// hasn't just failed (a Chromebook usually has no local model, and a fallback that isn't there is no fallback).
+const CLOUD_FALLBACKS = ['groq', 'lightning', 'free', 'gemma26'];
+const isCli = m => !!m && String(m.model).startsWith('cli/');                // your own Claude / ChatGPT accounts
+const cliEngine = m => String(m.model).slice(4);                            // 'claude' or 'codex'
+
+// Daily free budgets per provider (models.json "daily_limits"): OpenRouter's free models share 50 a day, Gemini ~20,
+// Groq 1,000. Every request (chat, race, voice) is counted here, and the router stops using a provider before it
+// runs out. Counts reset at midnight and survive restarts (DATA_DIR/usage.json).
+const USAGE_PATH = path.join(DATA_DIR, 'usage.json');
+const today = () => new Date().toISOString().slice(0, 10);
+let usage = readJSON(USAGE_PATH, { day: today(), counts: {} });
+const providerOf = model => String(model || '').split('/')[0];
+function noteUse(model) {
+  if (usage.day !== today()) usage = { day: today(), counts: {} };
+  const p = providerOf(model); usage.counts[p] = (usage.counts[p] || 0) + 1;
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(USAGE_PATH, JSON.stringify(usage)); } catch {}
+}
+function budgetLeft(model) {
+  if (usage.day !== today()) usage = { day: today(), counts: {} };
+  const lim = (config.daily_limits || {})[providerOf(model)];
+  return typeof lim === 'number' ? lim - (usage.counts[providerOf(model)] || 0) : Infinity;
+}
+
+// ---------------------------------------------------------------- Auto Router (Mark, Nov 22)
+// Like the Rocket Team experts: for each request, work out the JOB, rank the free models that are good at it by how
+// fast and reliable they've really been, then RACE the best two: ask #1, and if it hasn't started answering within
+// ~2 s (or fails), ask #2 too. The first to answer wins; the other is cancelled. Paid models only if allow_paid.
+const JOBS = {
+  code: /```|\b(code|function|bug|error|python|javascript|typescript|html|css|sql|regex|script|compile|stack ?trace|api|json|refactor)\b/i,
+  reason: /\b(why|prove|calculate|math|solve|plan|compare|analy[sz]e|explain how|step by step|strategy|pros and cons|decide|which is better)\b|\d+\s*[-+*\/^]\s*\d+/i,
+  creative: /\b(story|poem|song|lyrics|joke|script for|write me a|rap|caption|slogan|imagine)\b/i,
+  long: /\b(summari[sz]e|this (document|article|text|transcript)|tl;?dr)\b/i,
+};
+function classifyJob(message) {
+  const m = String(message || '');
+  if (m.length > 2500 || JOBS.long.test(m)) return 'long';
+  for (const j of ['code', 'reason', 'creative']) if (JOBS[j].test(m)) return j;
+  return m.split(/\s+/).length <= 12 ? 'quick' : 'chat';
+}
+const perf = {};                                   // id -> { ttft (ms, smoothed), fails, ok }
+function notePerf(id, ttft, failed, lost = false) {
+  const p = perf[id] || (perf[id] = { ttft: null, fails: 0, ok: 0 });
+  if (failed) { p.fails++; return; }
+  if (!lost) p.ok++;                                // losing a race isn't a success, but it tells us it was slow
+  p.ttft = p.ttft == null ? ttft : p.ttft * 0.7 + ttft * 0.3;
+}
+function rankFor(job, exclude = []) {
+  const recentFail = m => m.status && m.status.state === 'error' && Date.now() - (m.status.at || 0) < 3 * 60e3;
+  return allModels()
+    .filter(m => m.id !== 'auto' && !isCli(m) && m.installed && !exclude.includes(m.id) && (config.allow_paid || !m.paid) && !recentFail(m) && budgetLeft(m.model) > 0)
+    .map(m => {
+      const jobs = m.jobs || ['chat'];
+      const fit = jobs.includes(job) ? 3 : jobs.includes('chat') && job !== 'code' ? 1 : 0;
+      const p = perf[m.id] || {}, ttft = p.ttft ?? (m.local ? 4000 : 1500);
+      const reliability = p.ok || p.fails ? p.ok / (p.ok + p.fails) : 0.8;
+      const left = budgetLeft(m.model), lim = (config.daily_limits || {})[providerOf(m.model)];
+      const scarce = lim ? Math.max(0, 1 - left / lim) : 0;               // nearly used up today -> save it for when it matters
+      return { m, score: fit * 2 + reliability * 2 - Math.min(ttft, 20000) / 2500 - scarce * 2 };
+    })
+    .filter(x => x.score > -5).sort((a, b) => b.score - a.score).map(x => x.m);
+}
+// a concrete model for jobs that can't race (agents, Lina writer, Hands plans)
+const concrete = (entry, job = 'chat') => (entry && (entry.id === 'auto' || isCli(entry)) ? rankFor(job)[0] || allModels().find(m => m.id !== 'auto' && !isCli(m)) : entry);
+
+async function autoSpeak(send, message, system, messages, role) {
+  const job = classifyJob(message), cands = rankFor(job).slice(0, 3);
+  if (!cands.length) { send({ type: 'error', speaker: 'auto', label: 'Auto Router', message: 'no free model is available right now' }); return ''; }
+  let winner = null, launched = 0;
+  const tries = [];
+  const launch = () => {
+    const m = cands[launched++]; if (!m) return false;
+    const t = { m, ctrl: new AbortController(), t0: Date.now(), text: '', finished: false };
+    t.firstOrEnd = new Promise(res => { t.signal = res; });
+    t.done = (async () => {
+      try {
+        for await (const piece of streamModel(m, system, messages, 700, t.ctrl.signal)) {
+          if (!winner) {
+            winner = t; notePerf(m.id, Date.now() - t.t0, false);
+            for (const o of tries) if (o !== t) {                                      // cancel the slower ones,
+              if (!o.finished && !o.text) notePerf(o.m.id, Date.now() - o.t0, false, true);   // and remember they were slow
+              o.ctrl.abort();
+            }
+            send({ type: 'start', speaker: m.id, label: `${m.label} · auto: ${job}`, group: m.group, role });
+            t.signal();
+          }
+          if (winner !== t) return;
+          t.text += piece; send({ type: 'token', speaker: m.id, text: piece });
+        }
+        if (winner === t) { status[m.id] = { state: 'ok', ms: Date.now() - t.t0, at: Date.now() }; send({ type: 'end', speaker: m.id, ms: Date.now() - t.t0 }); }
+      } catch (e) {
+        if (!t.ctrl.signal.aborted) { notePerf(m.id, 0, true); status[m.id] = { state: 'error', error: cleanError(e.message), at: Date.now() }; }
+        if (winner === t) send({ type: 'error', speaker: m.id, label: m.label, message: cleanError(e.message), partial: !!t.text });
+      } finally { t.finished = true; t.signal(); }
+    })();
+    tries.push(t); return true;
+  };
+  launch();
+  while (!winner) {
+    const pending = tries.filter(t => !t.finished);
+    if (!pending.length) { if (!launch()) break; continue; }
+    const first = pending[0], expect = (perf[first.m.id] || {}).ttft;
+    const hedgeMs = Math.min(2500, Math.max(1200, (expect || 1200) * 1.5));
+    const hedge = launched < cands.length ? new Promise(r => setTimeout(() => r('hedge'), hedgeMs)) : new Promise(() => {});
+    const r = await Promise.race([...pending.map(t => t.firstOrEnd), hedge]);
+    if (r === 'hedge' && !winner) launch();                                              // #1 is slow: race #2
+  }
+  if (!winner) { send({ type: 'error', speaker: 'auto', label: 'Auto Router', message: `none of ${cands.map(c => c.label).join(', ')} answered` }); return ''; }
+  await winner.done;
+  return winner.text;
+}
+function bestFallback(activeId) {
+  const recentFail = m => m.status && m.status.state === 'error' && Date.now() - (m.status.at || 0) < 5 * 60e3;
+  const local = byId(config.fallback);
+  if (local && local.id !== activeId && local.id !== 'auto' && (!local.local || local.installed) && !recentFail(local) && budgetLeft(local.model) > 0) return local;
+  for (const id of config.fallbacks || CLOUD_FALLBACKS) {
+    const m = byId(id);
+    if (m && m.id !== activeId && !m.paid && m.installed && !recentFail(m) && budgetLeft(m.model) > 0) return m;
+  }
+  return null;
+}
 
 async function refreshHealth() {
   try {
@@ -126,15 +308,55 @@ async function resolveModel(query) {
   return entry;
 }
 
+// "every day at 9am", "every morning", "every 30 minutes", "every hour" -> a routine; the rest is the job
+function parseRoutine(text) {
+  let s = String(text || '').trim(), every_minutes = null, at = null, m, engine = null;
+  if ((m = s.match(/\s*,?\s*\b(?:using|with|on|through)\s+(?:my\s+)?(claude code|claude account|claude|codex|chat ?gpt)(?: account)?\b/i))) {
+    engine = /codex|gpt/i.test(m[1]) ? 'codex' : 'claude'; s = s.replace(m[0], ' ').replace(/\s+/g, ' ').trim();   // the agent's brain
+  }
+  const cut = re => { s = s.replace(re, ' ').replace(/\s+/g, ' ').replace(/^[\s,]+|[\s,.]+$/g, ''); };
+  if ((m = s.match(/\b(?:every|each) (\d+) ?(minutes?|mins?|hours?|hrs?)\b/i))) { every_minutes = +m[1] * (/^h/i.test(m[2]) ? 60 : 1); cut(m[0]); }
+  else if ((m = s.match(/\b(?:every|each) (minute|hour)\b|\bhourly\b/i))) { every_minutes = /minute/i.test(m[0]) ? 1 : 60; cut(m[0]); }
+  else if ((m = s.match(/\b(?:every ?day|daily|each day|every (morning|evening|night))(?: at (\d{1,2})(?::(\d{2}))? ?(am|pm|a\.m\.|p\.m\.)?)?/i))) {
+    let h = m[2] ? +m[2] : /evening|night/i.test(m[1] || '') ? 19 : 9; const mm = m[3] || '00';
+    if (m[4] && /p/i.test(m[4]) && h < 12) h += 12; if (m[4] && /a/i.test(m[4]) && h === 12) h = 0;
+    at = `${String(h).padStart(2, '0')}:${mm}`; cut(m[0]);
+  }
+  return { role: s, task: s, every_minutes, at, engine };
+}
+
 function parseCommand(text) {
-  const t = norm(text).replace(/^(hey |ok |okay )?jarvis\s*/, '');
+  const raw = String(text || '').trim().replace(/^(hey |ok |okay )?jarvis[\s,:]*/i, '');
   let m;
-  if ((m = t.match(/^(?:switch to |go to |activate |enter |show |show me |open |change to |switch scene to |change scene to )?(?:the )?(auto|automatic|adaptive|black hole|blackhole|singularity|sun|star|solar|circuit|circuit sphere|pulse|pulse sphere|spike|plasma|plasma orb|plasma ball|portal|warp|warp portal|vortex|liquid|liquid glass|glass|neural brain|brain|neural|data stream|stream|data flow|flow|reactor|normal|default|classic)(?: mode| scene| view| core| sphere)$/)) ||
-      (m = t.match(/^(?:switch|change|set) (?:the )?scene (?:to )?(auto|black hole|blackhole|sun|circuit|pulse|plasma|portal|liquid|neural brain|brain|neural|data stream|stream|reactor|normal|default)$/)) ||
+  if (/^(?:list |show |read )?(?:me )?(?:my |the )?lina rules[.!?]*$/i.test(raw)) return { action: 'lina_list' };
+  // Lina: keep the words as spoken/typed (numbers like 0.8 and -0.05 matter), only drop the trigger words
+  if ((m = raw.match(/^(?:write |make |create |add )?(?:a |an |the )?lina(?: rule| sigra)?\s*[:,-]?\s*(?:to |that |for |saying )?(.+)$/i)) && m[1].trim())
+    return { action: 'lina', text: m[1].trim().replace(/[.!?]+$/, '') };
+  const t = norm(text).replace(/^(hey |ok |okay )?jarvis\s*/, '');
+  if (/^(?:switch to |turn on |go |be |use |enable )?(?:the )?(grok|rebel|fun|unfiltered|spicy) (mode|personality)( on)?$/.test(t)) return { action: 'personality', personality: 'grok' };
+  if (/^(?:switch to |turn on |go |be |use |enable )?(?:the )?(serious|polite|formal|calm|butler) (mode|personality)( on)?$|^(grok|rebel|fun) mode off$/.test(t)) return { action: 'personality', personality: 'classic' };
+  if (/^(open|show|add|enter|set up|edit|change)( my| the)? (api )?(keys?|api keys?|settings)$|^(add|put in|enter) (my )?(groq|gemini|grok|openrouter|nvidia) (api )?key$/.test(t)) return { action: 'keys' };
+  if (/^(?:switch to |turn on |go |use |set )?(?:the )?(eco|battery|power saving|low power|performance|cool|quiet)(?: mode| quality)?( on)?$/.test(t)) return { action: 'quality', level: 'eco' };
+  if (/^(?:switch to |turn on |go |use |set )?(?:the )?(high|full|max|maximum|best|ultra) (quality|graphics|detail|mode)$|^(eco|battery) mode off$/.test(t)) return { action: 'quality', level: 'high' };
+  if (/^(?:switch to |use |set )?(?:the )?auto(?:matic)? (quality|graphics)$/.test(t)) return { action: 'quality', level: 'auto' };
+  if (/^(confirm|confirmed|save it|yes save( it)?|save the rule|keep it)$/.test(t)) return { action: 'lina_confirm' };
+  if (/^(cancel|discard( it)?|never mind|forget it|don t save( it)?)$/.test(t)) return { action: 'lina_cancel' };
+  if (/^(list|show|read)( me)?( my| the)? (lina )?rules$/.test(t)) return { action: 'lina_list' };
+  if (/^(how (did|are|is) (the |my )?(bots?|brains?|training|edge ?bot)( doing| do| going)?|(bot|brains?|training|edge ?bot|nightly) (report|status|update))$/.test(t)) return { action: 'edgebot' };
+  if ((m = t.match(/^(?:switch to |go to |activate |enter |show |show me |open |change to |switch scene to |change scene to )?(?:the )?(auto|automatic|adaptive|black hole|blackhole|singularity|sun|star|solar|circuit|circuit sphere|pulse|pulse sphere|spike|plasma|plasma orb|plasma ball|portal|warp|warp portal|vortex|liquid|liquid glass|glass|bloom|flower|neural brain|brain|neural|data stream|stream|data flow|flow|reactor|normal|default|classic)(?: mode| scene| view| core| sphere)$/)) ||
+      (m = t.match(/^(?:switch|change|set) (?:the )?scene (?:to )?(auto|black hole|blackhole|sun|circuit|pulse|plasma|portal|liquid|bloom|flower|neural brain|brain|neural|data stream|stream|reactor|normal|default)$/)) ||
       (m = t.match(/^(?:make|turn|change)(?: the)? (?:core|center|centre|middle)(?: into| to)?(?: a| the)? (black hole|sun|star|reactor|brain|circuit|plasma|portal|liquid|pulse)$/))) {
     const k = m[1];
-    return { action: 'scene', scene: /auto|adaptive/.test(k) ? 'auto' : /circuit/.test(k) ? 'circuit' : /pulse|spike/.test(k) ? 'pulse' : /plasma/.test(k) ? 'plasma' : /portal|warp|vortex/.test(k) ? 'portal' : /liquid|glass/.test(k) ? 'liquid' : /black ?hole|singularity/.test(k) ? 'blackhole' : /sun|star|solar/.test(k) ? 'sun' : /brain|neural/.test(k) ? 'brain' : /stream|flow/.test(k) ? 'stream' : 'reactor' };
+    return { action: 'scene', scene: /auto|adaptive/.test(k) ? 'auto' : /circuit/.test(k) ? 'plasma' : /pulse|spike/.test(k) ? 'liquid' : /plasma/.test(k) ? 'plasma' : /portal|warp|vortex/.test(k) ? 'portal' : /liquid|glass/.test(k) ? 'liquid' : /bloom|flower/.test(k) ? 'bloom' : /black ?hole|singularity/.test(k) ? 'blackhole' : /sun|star|solar/.test(k) ? 'sun' : /brain|neural/.test(k) ? 'brain' : /stream|flow/.test(k) ? 'brain' : 'reactor' };   // circuit, pulse and data stream were retired
   }
+  // laptop control: "take control of my laptop (and open firefox)", "stop" / "release control"
+  if ((m = t.match(/^(?:please |can you |i want you to )?(?:take|get|grab|have) (?:full )?(?:control|over)(?: of| over)?(?: my| the)?(?: laptop| computer| pc| desktop| screen| machine| mouse)?(?:(?:,| and| then| to)\s+(.+))?$/)))
+    return { action: 'control', on: true, task: m[1] || '' };
+  if (/^(?:stop|release|cancel|end|drop|quit|exit)(?: the)?(?: laptop)? control|^give (?:me )?(?:back )?(?:the )?control|^hands off|^stop(?: it| now| that| everything)?$/.test(t)) return { action: 'control', on: false };
+  // black hole play: "throw a star in", "send light", "feed it gas", "clear the black hole"
+  if ((m = t.match(/^(?:throw|send|drop|shoot|fire|feed(?: it| the black hole)?|launch|add)(?: in| into)?(?: a| an| some| the| more)? (light|laser|photons?|beams?|gas|matter|cloud|stars?|planets?|rocks?|asteroids?)\b/)))
+    return { action: 'play', what: /light|laser|photon|beam/.test(m[1]) ? 'light' : /gas|matter|cloud/.test(m[1]) ? 'gas' : /star/.test(m[1]) ? 'star' : 'planet' };
+  if (/^(clear|reset|clean)( the| my)? (black hole|play|space)$/.test(t)) return { action: 'play', what: 'clear' };
   if ((m = t.match(/^(?:change|switch|set|make|turn)(?: the| your| my)? (?:colou?rs?|theme)(?: to| into)? (\w+)$/)) || (m = t.match(/^(?:go |use |make it )?(\w+) (?:colou?rs?|theme)$/))) {
     const c = m[1];
     const theme = /blue|ice|cyan|sky/.test(c) ? 'ice' : /purple|violet|lilac|magenta/.test(c) ? 'violet' : /red|crimson/.test(c) ? 'crimson' : /green|emerald|mint/.test(c) ? 'emerald' : /gold|yellow/.test(c) ? 'gold' : /orange|amber|default|normal|original/.test(c) ? 'amber' : null;
@@ -151,18 +373,36 @@ function parseCommand(text) {
   if (/^(stop|end|disable|close|turn off|exit)( the)? council|council (mode )?(off|stop)/.test(t)) return { action: 'council', on: false };
   if (/^(status|system status|report|diagnostics)$|^(which|what) model( are you| is active| are we)/.test(t)) return { action: 'status' };
   if (/^(list|show|what are)( the| my| your)? models|^what models/.test(t)) return { action: 'list' };
+  // Your own accounts (hands/brains.js): "ask Claude Code to ...", "ask my ChatGPT to ...", "Codex, ..."
+  if ((m = raw.match(/^(?:ask|tell|have|get|use)\s+(?:my\s+)?(claude code|claude account|my claude|claude|codex|chat ?gpt)(?: account)?\s+(?:to\s+)?(.+)$/i)) ||
+      (m = raw.match(/^(claude code|codex)\s*[,:]\s*(.+)$/i)))
+    return { action: 'brain', engine: /codex|gpt/i.test(m[1]) ? 'codex' : 'claude', text: m[2].trim().replace(/[.!?]+$/, '') };
+  // Agents (hands/agents.js): Jarvis is the chief of staff of a team of bots that work on your computer
+  if ((m = raw.match(/^(?:create|make|build|add|set up|spin up|hire)(?: me)?(?: a| an| new)* (?:agent|bot)(?: called| named)?\s+["']?([\w-]+)["']?\s*(?:,|:|that|to|who|which|whose job is to|for)?\s+(.+)$/i)))
+    return { action: 'agent', op: 'create', name: m[1], ...parseRoutine(m[2]) };
+  if ((m = raw.match(/^(?:ask|tell|have|get|send)\s+(?:the |my |agent |bot )*([\w-]+?)(?: agent| bot)?\s+to\s+(.+)$/i)) && !/^(me|him|her|them|us|it|jarvis|you|everyone)$/i.test(m[1]))
+    return { action: 'agent', op: 'run', name: m[1], task: m[2].replace(/[.!?]+$/, '') };
+  if ((m = t.match(/^run (?:the |my )?([\w-]+) (?:agent|bot)(?: now)?$/))) return { action: 'agent', op: 'run', name: m[1], task: '' };
+  if (/^((list|show)( me)?( my| the| all)? (agents|bots|team)|who is on (my|the) team|my (agents|team))$/.test(t)) return { action: 'agent', op: 'list' };
+  if ((m = t.match(/^(?:delete|remove|fire) (?:the |my )?(?:agent |bot )?([\w-]+)(?: agent| bot)?$/))) return { action: 'agent', op: 'delete', name: m[1] };
+  if ((m = t.match(/^what (?:did|has) (?:the |my )?([\w-]+)(?: agent| bot)? (?:do|done|find|found)|^([\w-]+) (?:agent |bot )?report$/))) return { action: 'agent', op: 'report', name: m[1] || m[2] };
+  // Jarvis Hands (your computer): "computer, ...", "on my computer ...", "terminal ...", "run ...", "open <site>"
+  if ((m = raw.match(/^(?:(?:on |use )?(?:my |the )?(?:computer|laptop|terminal|pc|mac|chromebook)|run|execute)\s*[:,-]?\s+(.+)$/i)) && m[1].trim()) return { action: 'hands', text: m[1].trim() };
+  if ((m = raw.match(/^(?:open|browse to|launch|pull up)\s+(?:the |a )?(?:website |site |page |url )?(\S.*)$/i))) return { action: 'hands', text: 'open ' + m[1].trim() };
+  if (/^(hands|computer control) status$/.test(t)) return { action: 'hands_status' };
   return null;
 }
 
 // ---------------------------------------------------------------- talking to models
 const VOICE_RULES = 'Your words are spoken aloud by a voice. Plain sentences only: no markdown, lists, code blocks, tables or emojis. Keep it under 80 words unless Mark asks for detail.';
 
-async function* streamModel(entry, system, messages, maxTokens = 700) {
+async function* streamModel(entry, system, messages, maxTokens = 700, cancel = null) {
+  noteUse(entry.model);
   const res = await fetch(ROUTER + '/v1/messages', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', authorization: 'Bearer ' + ROUTER_TOKEN },
     body: JSON.stringify({ model: entry.model, system, messages, max_tokens: maxTokens, stream: true, thinking: { type: 'disabled' } }),
-    signal: AbortSignal.timeout(180e3),
+    signal: cancel ? AbortSignal.any([AbortSignal.timeout(180e3), cancel]) : AbortSignal.timeout(180e3),
   });
   if (!res.ok || !res.body) {
     let msg = 'HTTP ' + res.status;
@@ -244,23 +484,69 @@ function cleanHistory(history) {
   return out;
 }
 
+// quick direct actions while Jarvis has the laptop: no vision model needed
+function directAction(msg) {
+  const t = norm(msg); let m;
+  if ((m = t.match(/^scroll (up|down|left|right)(?: (\d+|a lot|a little|more))?$/))) return { action: 'scroll', direction: m[1], amount: m[2] === 'a lot' ? 12 : m[2] === 'a little' ? 2 : +m[2] || 5 };
+  if ((m = String(msg).match(/^\s*type\s+(.+?)\s*$/i))) return { action: 'type', text: m[1] };
+  if ((m = t.match(/^(?:press|hit) (.+)$/))) return { action: 'key', keys: m[1].replace(/ (?:plus|and) /g, '+').replace(/\s+/g, '+') };
+  if (/^(?:left )?click(?: here| it)?$/.test(t)) return { action: 'click_here' };
+  if (/^double click(?: here| it)?$/.test(t)) return { action: 'double_click_here' };
+  if (/^right click(?: here| it)?$/.test(t)) return { action: 'right_click_here' };
+  return null;
+}
+
 async function handleChat(body, send) {
-  const message = String(body.message || '').trim().slice(0, 4000);
+  let message = String(body.message || '').trim().slice(0, 4000);
   if (!message) return send({ type: 'done' });
+  const say = text => { send({ type: 'start', speaker: 'jarvis', label: me(), group: 'System', role: 'system' }); send({ type: 'token', speaker: 'jarvis', text }); send({ type: 'end', speaker: 'jarvis' }); };
+  const who = !body.hands_result && pickAssistant(message);
+  if (who) {
+    const changed = setAssistant(who.who);
+    if (changed) send({ type: 'command', action: 'assistant', name: who.who, label: me(), active: state.active });
+    if (!who.rest) return say(who.who === 'sophia' ? (changed ? "Sophia here. Jarvis was boring you, wasn't he?" : "Still me. What do you need?") : (changed ? 'Jarvis here, sir. Back to business.' : 'At your service.'));
+    message = who.rest;
+  }
   const cmd = parseCommand(message);
-  const say = text => { send({ type: 'start', speaker: 'jarvis', label: 'Jarvis', group: 'System', role: 'system' }); send({ type: 'token', speaker: 'jarvis', text }); send({ type: 'end', speaker: 'jarvis' }); };
 
   if (cmd && cmd.action === 'switch') {
     const m = await resolveModel(cmd.query);
     if (!m) return say(`I couldn't find a model called ${cmd.query}. Say "list models" to hear the options.`);
     if (m.local && !localModels.includes(m.model.slice(7))) return say(`${m.label} isn't downloaded yet. Run the add-model script first.`);
-    state.active = m.id; saveState();
+    state.active = m.id; state.activeBy[state.assistant] = m.id; saveState();
     send({ type: 'command', action: 'switch', id: m.id, label: m.label });
     return say(`Switching to ${m.label}${m.paid ? ', which uses paid credit' : ''}. Routing established.`);
+  }
+  if (cmd && cmd.action === 'personality') {
+    state.personality = cmd.personality; saveState();
+    return say(cmd.personality === 'grok' ? 'Grok mode. Filters off, jokes on. What are we breaking today?' : 'Serious mode, sir. Calm and polite from here on.');
+  }
+  if (cmd && cmd.action === 'keys') { send({ type: 'command', action: 'keys' }); return say('Opening the keys form. Paste each key, then press Save. They stay on this computer.'); }
+  if (cmd && cmd.action === 'quality') {
+    send({ type: 'command', action: 'quality', level: cmd.level });
+    return say(({ eco: 'Eco mode: 30 frames a second, lighter effects, and I go quiet when you do. Your laptop stays cool.',
+      high: 'Full quality. Every effect on, 60 frames a second. Hope your fans are ready.',
+      auto: "Auto quality: I'll choose eco on a Chromebook or a small laptop and full quality on a strong one." })[cmd.level]);
   }
   if (cmd && cmd.action === 'theme') { send({ type: 'command', action: 'theme', theme: cmd.theme }); return; }
   if (cmd && cmd.action === 'scene') { send({ type: 'command', action: 'scene', scene: cmd.scene }); return; }
   if (cmd && cmd.action === 'holo') { send({ type: 'command', action: 'holo', on: cmd.on }); return; }
+  if (cmd && cmd.action === 'control') {
+    state.controlMode = cmd.on;
+    send({ type: 'command', action: 'control', on: cmd.on, task: cmd.task || '' });
+    return say(!cmd.on ? 'Control released. Your laptop is all yours.'
+      : cmd.task ? 'Taking control of your laptop. On it.'
+      : 'I have your laptop. Tell me what to do. Say stop, press Escape, or push the mouse into the top left corner to take it back.');
+  }
+  if (!cmd && state.controlMode) {             // while in control, everything you say is an order for the laptop
+    const direct = directAction(message);
+    send({ type: 'command', action: 'control', on: true, task: direct ? '' : message, direct });
+    return say(direct ? 'Done.' : 'On it.');
+  }
+  if (cmd && cmd.action === 'play') {
+    send({ type: 'command', action: 'play', what: cmd.what });
+    return say(cmd.what === 'clear' ? 'Space cleared.' : ({ light: 'Firing a beam of light past the event horizon.', gas: 'Releasing a gas cloud. Watch it spiral in and heat up.', star: 'Sending a star in. The tides will tear it apart.', planet: 'Dropping a planet. It will not survive.' })[cmd.what]);
+  }
   if (cmd && cmd.action === 'voice') {
     send({ type: 'command', action: 'voice', query: cmd.query });   // the browser knows which voices exist
     return;
@@ -274,15 +560,63 @@ async function handleChat(body, send) {
   if (cmd && cmd.action === 'status') {
     const a = byId(state.active);
     const okCount = allModels().filter(m => m.status.state === 'ok').length;
-    return say(`Running on ${a ? a.label : 'nothing'}. Router ${routerOnline ? 'online' : 'offline'}, local engine ${localOnline ? 'online with ' + localModels.length + ' models' : 'offline'}. ${okCount} links confirmed working. Council mode is ${state.councilMode ? 'on' : 'off'}.`);
+    return say(`${me()} here, running on ${a ? a.label : 'nothing'}, ${state.personality === 'grok' ? 'Grok' : 'serious'} personality. Router ${routerOnline ? 'online' : 'offline'}, local engine ${localOnline ? 'online with ' + localModels.length + ' models' : 'offline'}. ${okCount} links confirmed working. Council mode is ${state.councilMode ? 'on' : 'off'}.${Object.entries(config.daily_limits || {}).filter(([k, v]) => typeof v === 'number' && usage.counts[k]).map(([k, v]) => ` ${k.replace('_', ' ')}: ${usage.counts[k]} of ${v} free requests used today.`).join('')}`);
   }
+  if (cmd && cmd.action === 'lina') return linaRule(cmd.text, send, say);
+  if (cmd && cmd.action === 'lina_confirm') {
+    if (!pendingRule) return say('There is nothing waiting to confirm.');
+    const n = saveRule(pendingRule); const r = pendingRule; pendingRule = null;
+    send({ type: 'command', action: 'lina', status: 'saved', rule: r.text });
+    return say(`Saved. You now have ${n} Lina rule${n === 1 ? '' : 's'}. ${r.english}`);
+  }
+  if (cmd && cmd.action === 'lina_cancel') {
+    if (!pendingRule) return say('Nothing to cancel.');
+    pendingRule = null; return say('Discarded. Nothing was saved.');
+  }
+  if (cmd && cmd.action === 'lina_list') {
+    const rules = readRules();
+    if (!rules.length) return say('You have no saved Lina rules yet.');
+    return say(rules.slice(-5).map((r, i) => `Rule ${rules.length - Math.min(5, rules.length) + i + 1}: ${r.english}`).join(' '));
+  }
+  if (cmd && cmd.action === 'edgebot') return say(await edgebotReport());
+  if (cmd && cmd.action === 'hands') return handsPlan(cmd.text, body.hands, send, say);
+  if (cmd && cmd.action === 'brain') {
+    if (!body.hands || !body.hands.cwd) return say('Your own Claude and ChatGPT accounts work through Claude Code and Codex on your computer, so Jarvis Hands needs to be running.');
+    send({ type: 'command', action: 'brain', engine: cmd.engine, prompt: cmd.text, system: '', label: cmd.engine === 'codex' ? 'ChatGPT (your account)' : 'Claude (your account)' });
+    return say(`Handing that to ${cmd.engine === 'codex' ? 'your ChatGPT through Codex' : 'your Claude through Claude Code'}. It works on your computer, so it can take a minute.`);
+  }
+  if (cmd && cmd.action === 'agent') {
+    if (!body.hands || !body.hands.cwd) return say('Agents live in Jarvis Hands on your computer. Run node hands/hands.js, then type: hands code, and the code it shows.');
+    const brain = concrete(byId(state.active) || allModels()[0], 'code');
+    send({ type: 'command', action: 'agent', ...cmd, model: cmd.op === 'create' ? brain.model : undefined });
+    const when = cmd.at ? ` every day at ${cmd.at}` : cmd.every_minutes ? ` every ${cmd.every_minutes >= 60 && cmd.every_minutes % 60 === 0 ? cmd.every_minutes / 60 + ' hour' + (cmd.every_minutes > 60 ? 's' : '') : cmd.every_minutes + ' minutes'}` : '';
+    return say(({ create: `Hiring ${cmd.name}. Job: ${cmd.role}.${when ? ' Routine:' + when + '.' : ''} It thinks with ${cmd.engine ? (cmd.engine === 'codex' ? 'your ChatGPT, through Codex' : 'your Claude, through Claude Code') : brain.label}.`,
+      run: `Sending ${cmd.name} off${cmd.task ? ' to ' + cmd.task : ' on its usual job'}. I'll report back.`, list: 'Here is the team.',
+      delete: `Letting ${cmd.name} go.`, report: `Checking what ${cmd.name} did.` })[cmd.op]);
+  }
+  if (cmd && cmd.action === 'hands_status') return say(body.hands ? `Hands connected on ${body.hands.os}. Work folder: ${body.hands.cwd}. Say "hands disconnect" in the HUD to unpair.` : 'Hands are not connected. Run node hands/hands.js on your computer, then type: hands code, and the code it shows.');
   if (cmd && cmd.action === 'list') {
     return say('Available: ' + allModels().filter(m => m.installed).map(m => m.label).join(', ') + '.');
   }
 
+  if (body.hands_result) return handsSummary(body.hands_result, send);
+
   const history = cleanHistory(body.history);
-  const active = byId(state.active) || allModels()[0];
-  const fallback = byId(config.fallback);
+  const picked = byId(state.active) || allModels()[0];
+  if (!state.councilMode && isCli(picked)) {                       // answer with your own subscription, on your computer
+    if (!body.hands || !body.hands.cwd) return say(`${picked.label} runs through ${cliEngine(picked) === 'codex' ? 'Codex' : 'Claude Code'} on your computer, so Jarvis Hands needs to be running. Say "switch to auto router" to use the free models instead.`);
+    const recent = history.slice(-6).map(h => `${h.role === 'user' ? 'Mark' : me()}: ${h.content}`).join('\n');
+    send({ type: 'command', action: 'brain', engine: cliEngine(picked), label: picked.label, chat: true,
+      prompt: (recent ? `Conversation so far:\n${recent}\n\n` : '') + `Mark: ${message}`, system: `${persona()}\n\n${VOICE_RULES}` });
+    return;
+  }
+  if (!state.councilMode && picked.id === 'auto') {
+    const system = `${persona()}\n\n${VOICE_RULES}`;
+    await autoSpeak(send, message, system, [...history, { role: 'user', content: message }], 'answer');
+    return;
+  }
+  const active = concrete(picked, 'reason');
+  const fallback = bestFallback(active.id);
 
   if (!state.councilMode) {
     const system = `${persona()}\n\n${VOICE_RULES}\nYou are currently running on the ${active.label} model (${active.group}).`;
@@ -291,7 +625,7 @@ async function handleChat(body, send) {
   }
 
   // ---- Council: each member speaks in turn and can react to the others.
-  const members = state.council.map(id => byId(id)).filter(m => m && m.installed).slice(0, 4);
+  const members = state.council.map(id => byId(id)).filter(m => m && m.installed && m.id !== 'auto').slice(0, 4);
   const names = members.map(m => m.label);
   send({ type: 'council', members: members.map(m => m.id) });
   const said = [];
@@ -313,11 +647,159 @@ async function handleChat(body, send) {
     'verdict', { fallback });
 }
 
+// ---------------------------------------------------------------- Lina (Lina Sigra checker, ../lina)
+async function lina(pathname, body) {
+  const r = await fetch(LINA + pathname, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) } : { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error('Lina checker HTTP ' + r.status);
+  return r.json();
+}
+const firstLine = t => (String(t || '').split('\n').map(l => l.trim().replace(/^`+|`+$/g, '').trim()).find(Boolean) || '');
+
+// English (or Lina) -> one checked Lina rule. The writer model only writes text; the Lina engine decides if it is valid.
+async function linaRule(request, send, say) {
+  let line = /^se\s/i.test(request) ? request : '', check = null, tries = 0;
+  try {
+    if (line) check = await lina('/check', { text: line });
+    else {
+      const prompt = await lina('/prompt');
+      const writer = concrete(byId(config.lina_writer) || byId(state.active) || allModels()[0], 'code');
+      const shots = prompt.shots.flatMap(([q, a]) => [{ role: 'user', content: q }, { role: 'assistant', content: a }]);
+      let messages = [...shots, { role: 'user', content: request }];
+      while (tries < 2) {                                  // one retry, with the engine's reason, if the first try is invalid
+        tries++;
+        const text = await speak(send, writer, prompt.system, messages, 'lina', { maxTokens: 120, fallback: bestFallback(writer.id) });
+        line = firstLine(text);
+        if (!line) break;
+        check = await lina('/check', { text: line });
+        if (check.ok) break;
+        messages = [...messages, { role: 'assistant', content: line }, { role: 'user', content: `Lina rejected that: ${check.error}. Write the corrected rule only.` }];
+      }
+    }
+  } catch (e) {
+    return say(`The Lina checker isn't answering (${cleanError(e.message)}). Run docker compose up -d lina.`);
+  }
+  if (!line || !check) return say("I couldn't get a Lina rule out of that. Try saying it more simply.");
+  if (!check.ok) { send({ type: 'command', action: 'lina', status: 'invalid', rule: line, error: check.error }); return say(`Lina rejected ${line}. ${check.error}`); }
+  if (check.rules.length !== 1) return say('Please give me one rule at a time.');
+  pendingRule = { text: check.rules[0].text, english: check.rules[0].english, fingerprint: check.fingerprint };
+  send({ type: 'command', action: 'lina', status: 'valid', rule: pendingRule.text, english: pendingRule.english });
+  say(`Valid Lina: ${pendingRule.text}. That means: ${pendingRule.english} Say confirm to save it, or cancel.`);
+}
+
+function readRules() {
+  let src = '';
+  try { src = fs.readFileSync(RULES_PATH, 'utf8'); } catch { return []; }
+  const out = []; let english = '';
+  for (const l of src.split('\n')) {
+    if (l.startsWith('# means: ')) english = l.slice(9);
+    else if (l.trim() && !l.startsWith('#')) { out.push({ text: l.trim(), english }); english = ''; }
+  }
+  return out;
+}
+function saveRule(r) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  setTimeout(() => { try { sync.push('hud.rules', fs.readFileSync(RULES_PATH, 'utf8')); } catch {} }, 50);
+  fs.appendFileSync(RULES_PATH, `# saved ${new Date().toISOString()} (fingerprint ${String(r.fingerprint).slice(0, 16)})\n# means: ${r.english}\n${r.text}\n`);
+  return readRules().length;
+}
+
+// ---------------------------------------------------------------- Jarvis Hands (../hands/hands.js on your computer)
+// The model plans one step as JSON and it runs straight away: your browser (not this server, which lives in Docker)
+// sends it to Jarvis Hands. Mark's own rules (LOCKED in hands/hands.js) are checked here and on his computer.
+let handsLocked = null;
+for (const f of ['./hands.js', '../hands/hands.js']) {       // Mark's own LOCKED list from Jarvis Hands (Docker / local)
+  try { handsLocked = require(f).lockedReason; break; } catch {}
+}
+if (!handsLocked) handsLocked = () => null;               // Jarvis Hands still refuses locked commands on its side
+const HANDS_RULES = (h) => `You operate Mark's computer for him through Jarvis Hands. Computer: ${h.os}. Shell: ${h.shell}. ` +
+  `Commands start in the folder ${h.cwd}. Turn the request into exactly ONE step and reply with JSON only, no other text:\n` +
+  `{"action":"run","command":"<one shell command>","why":"<what it does, under 15 words>"}\n` +
+  `{"action":"open","url":"https://...","why":"..."}  (to open a website in his browser)\n` +
+  `{"action":"none","why":"<why it can't or shouldn't be done>"}\n` +
+  `For several steps, give only the first one.`;
+
+function parsePlan(text) {
+  const m = String(text || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { const j = JSON.parse(m[0]); return j && typeof j === 'object' ? j : null; } catch { return null; }
+}
+
+async function handsPlan(request, hands, send, say) {
+  if (!hands || !hands.cwd) return say('Hands are not connected. Run node hands/hands.js on your computer, then type: hands code, and the code it shows.');
+  const writer = concrete(byId(state.active) || allModels()[0], 'code');
+  let text = '';
+  try {
+    for await (const piece of streamModel(writer, HANDS_RULES(hands), [{ role: 'user', content: request }], 300)) text += piece;
+  } catch (e) { return say(`I couldn't plan that: ${cleanError(e.message)}.`); }
+  const p = parsePlan(text);
+  if (!p || !['run', 'open', 'none'].includes(p.action)) return say("I couldn't turn that into a safe step. Try saying it more simply.");
+  if (p.action === 'none') return say(`I won't do that: ${String(p.why || 'not possible').slice(0, 200)}`);
+  const why = String(p.why || '').slice(0, 200).trim().replace(/([^.!?])$/, '$1.');
+  if (p.action === 'open') {
+    let url; try { url = new URL(String(p.url)); } catch { return say("That isn't a web address I can open."); }
+    if (!/^https?:$/.test(url.protocol)) return say('I only open http and https pages.');
+    send({ type: 'command', action: 'hands_run', step: { action: 'open', url: url.href, why } });
+    return say(`Opening ${url.hostname}.`);
+  }
+  const command = String(p.command || '').trim().slice(0, 2000);
+  if (!command) return say("I couldn't work out the command.");
+  const locked = handsLocked(command);
+  if (locked) { send({ type: 'command', action: 'hands_refused', command, reason: locked }); return say(`That command is on your locked list: ${locked}. I won't run it.`); }
+  send({ type: 'command', action: 'hands_run', step: { action: 'run', command, why } });
+  return say(`Running ${command}. ${why}`);
+}
+
+async function handsSummary(r, send) {
+  const active = concrete(byId(state.active) || allModels()[0], 'quick');
+  const out = String(r.stdout || '').slice(0, 3000), err = String(r.stderr || '').slice(0, 1000);
+  const system = `${persona()}\n\nYou just ran a command on Mark's computer through Jarvis Hands. Tell him what the result means in at most two short sentences. ${VOICE_RULES}`;
+  await speak(send, active, system, [{ role: 'user', content: `Command: ${String(r.command || '').slice(0, 500)}\nExit code: ${r.code}\nOutput:\n${out || '(none)'}${err ? '\nErrors:\n' + err : ''}` }], 'answer', { fallback: bestFallback(active.id), maxTokens: 200 });
+}
+
+// ---------------------------------------------------------------- Edge Bot by voice (read-only)
+async function edgebotReport() {
+  try {
+    const r = await fetch(EDGEBOT, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json(); const n = j.latest; const t = j.totals || {};
+    if (!n) return 'Edge Bot has no nightly results yet.';
+    const day = new Date(n.at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    const best = [...(n.markets || [])].sort((a, b) => (b.best_level || 0) - (a.best_level || 0))[0];
+    const grads = (n.markets || []).reduce((s, m) => s + (m.graduates || 0), 0);
+    return `Last training night was ${day}. ${n.markets.length} markets, best was ${best.name} at level ${best.best_level} of 8. ` +
+      `${grads ? grads + ' bots graduated that night' : 'No bot graduated that night'}. All time: ${(t.bots_tested || 0).toLocaleString('en-US')} bots tested, ` +
+      `${t.graduates || 0} graduates, ${t.proven || 0} proven. ${n.alarm_ok ? 'No alarms.' : 'The safety alarm went off, check the report.'} Paper money only.`;
+  } catch (e) { return `I couldn't reach Edge Bot (${cleanError(e.message)}).`; }
+}
+
 // ---------------------------------------------------------------- studio voices (Kokoro)
 const ACCENTS = { a: 'American', b: 'British', e: 'Spanish', f: 'French', h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin' };
 let voiceCache = { at: 0, list: [] };
+// Free natural cloud voices through OpenRouter (Fish Audio), described in words per assistant (models.json "tts").
+// Offered only when an OpenRouter key is set; each spoken reply is one OpenRouter request (counted in the budget).
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || '';
+const OPENROUTER_URL = (process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+const CLOUD_VOICES = [
+  { id: 'fish_jarvis', name: 'Jarvis (Fish Audio, cloud)', accent: 'British', gender: 'male', grade: 'cloud', cloud: true },
+  { id: 'fish_sophia', name: 'Sophia (Fish Audio, cloud)', accent: 'American', gender: 'female', grade: 'cloud', cloud: true },
+];
+async function cloudSpeech(voice, text, speed, res) {
+  const tts = config.tts || {}, model = tts.model || 'fish-audio/s2.1-pro-free:free';
+  if (!OPENROUTER_KEY) return json(res, 503, { error: 'cloud voices need OPENROUTER_API_KEY in .env' });
+  if (budgetLeft('open_router/x') <= 0) return json(res, 429, { error: "today's free OpenRouter requests are used up" });
+  noteUse('open_router/' + model);
+  const r = await fetch(OPENROUTER_URL + '/audio/speech', {
+    method: 'POST', signal: AbortSignal.timeout(60e3),
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + OPENROUTER_KEY, 'x-title': 'Jarvis OS' },
+    body: JSON.stringify({ model, input: text, response_format: 'mp3', speed, instructions: tts[voice.replace(/^fish_/, '')] || undefined }),
+  });
+  if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); m = (j.error && j.error.message) || m; } catch {} throw new Error(m); }
+  const buf = Buffer.from(await r.arrayBuffer());
+  res.writeHead(200, { 'content-type': 'audio/mpeg', 'cache-control': 'no-store', 'content-length': buf.length }); res.end(buf);
+}
+
 async function studioVoices() {
-  if (Date.now() - voiceCache.at < 60e3 && voiceCache.list.length) return { online: true, voices: voiceCache.list };
+  if (Date.now() - voiceCache.at < 60e3 && voiceCache.list.length) return { online: true, voices: OPENROUTER_KEY ? [...voiceCache.list, ...CLOUD_VOICES] : voiceCache.list };
   try {
     const r = await fetch(KOKORO + '/v1/audio/voices', { signal: AbortSignal.timeout(4000) });
     const j = await r.json();
@@ -328,14 +810,17 @@ async function studioVoices() {
       accent: ACCENTS[v.id[0]] || v.id[0], gender: v.id[1] === 'f' ? 'female' : 'male', grade: v.grade || '',
     })).sort((x, y) => rank(x.grade) - rank(y.grade) || x.id.localeCompare(y.id));
     voiceCache = { at: Date.now(), list };
-    return { online: true, voices: list };
-  } catch { return { online: false, voices: [] }; }
+    return { online: true, voices: OPENROUTER_KEY ? [...list, ...CLOUD_VOICES] : list };
+  } catch { return OPENROUTER_KEY ? { online: true, voices: CLOUD_VOICES } : { online: false, voices: [] }; }
 }
 async function studioSpeech(body, res) {
   const text = String(body.text || '').slice(0, 1200).trim();
   const voice = String(body.voice || 'bm_george').replace(/[^a-z0-9_+()., ]/gi, '').slice(0, 80);
   const speed = Math.min(1.6, Math.max(0.6, Number(body.speed) || 1));
   if (!text) { res.writeHead(400); return res.end(); }
+  if (/^fish_(jarvis|sophia)$/.test(voice)) {
+    try { return await cloudSpeech(voice, text, speed, res); } catch (e) { return json(res, 502, { error: 'cloud voice failed: ' + e.message }); }
+  }
   try {
     const r = await fetch(KOKORO + '/v1/audio/speech', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -352,7 +837,8 @@ async function studioSpeech(body, res) {
 }
 
 // ---------------------------------------------------------------- http
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json',
+  '.jpg': 'image/jpeg', '.webmanifest': 'application/manifest+json' };
 
 function readBody(req) {
   return new Promise((resolve) => {
@@ -367,24 +853,47 @@ function json(res, code, obj) {
 }
 function publicState() {
   return {
-    active: state.active, councilMode: state.councilMode, council: state.council, fallback: config.fallback,
-    router: { online: routerOnline, url: ROUTER }, local: { online: localOnline, models: localModels },
+    usage: { day: usage.day, counts: usage.counts, limits: config.daily_limits || {} },
+    active: state.active, councilMode: state.councilMode, personality: state.personality, assistant: state.assistant, assistantLabel: me(), council: state.council, fallback: config.fallback,
+    router: { online: routerOnline, url: ROUTER }, local: { online: localOnline, models: localModels }, sync: sync.status,
     models: allModels(),
   };
 }
 
+// Only pages opened on this computer may use the HUD. Without this, any website you visit could quietly switch you to a
+// paid model or start chats with your keys (a "simple" cross-site POST), or read answers through DNS rebinding.
+function allowed(req) {
+  const host = String(req.headers.host || '').toLowerCase();
+  if (!ALLOWED_HOSTS.has(host)) return 'unknown host';
+  const origin = req.headers.origin;
+  if (origin && origin !== 'null' && !ALLOWED_HOSTS.has(origin.replace(/^https?:\/\//, '').toLowerCase())) return 'cross-site request';
+  if (origin === 'null') return 'cross-site request';
+  if (req.method === 'POST' && !/^application\/json\b/i.test(String(req.headers['content-type'] || ''))) return 'JSON only';
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  const blocked = allowed(req);
+  if (blocked) { res.writeHead(403, { 'content-type': 'text/plain' }); return res.end('blocked: ' + blocked); }
   try {
     if (url.pathname === '/api/state' && req.method === 'GET') {
       await refreshHealth();
       return json(res, 200, publicState());
     }
     if (url.pathname === '/api/voices' && req.method === 'GET') return json(res, 200, await studioVoices());
+    if (url.pathname === '/api/prefs' && req.method === 'GET') return json(res, 200, { ...prefs, sync: sync.status });
+    if (url.pathname === '/api/prefs' && req.method === 'POST') {
+      const b = await readBody(req); const t = Date.parse(b.updated_at);
+      if (b.value && typeof b.value === 'object' && Number.isFinite(t) && (!prefs.updated_at || t > Date.parse(prefs.updated_at))) {
+        prefs = { value: b.value, updated_at: new Date(t).toISOString() }; sync.push('hud.prefs', prefs.value, prefs.updated_at);
+      }
+      return json(res, 200, { ok: true });
+    }
     if (url.pathname === '/api/tts' && req.method === 'POST') return studioSpeech(await readBody(req), res);
     if (url.pathname === '/api/command' && req.method === 'POST') {
       const b = await readBody(req);
-      if (b.action === 'switch' && byId(b.id)) state.active = b.id;
+      if (b.action === 'switch' && byId(b.id)) { state.active = b.id; state.activeBy[state.assistant] = b.id; }
       else if (b.action === 'council') state.councilMode = !!b.on;
       else if (b.action === 'councilMembers' && Array.isArray(b.ids)) state.council = b.ids.filter(id => byId(id)).slice(0, 4);
       else return json(res, 400, { error: 'unknown command' });
@@ -412,8 +921,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-refreshHealth().finally(() => server.listen(PORT, () => {
+Promise.race([syncOnStart().catch(e => console.warn('sync:', e.message)), new Promise(r => setTimeout(r, 6000))])
+  .then(() => refreshHealth()).finally(() => server.listen(PORT, () => {
   console.log(`Jarvis HUD on http://localhost:${PORT}  (router ${ROUTER}, ollama ${OLLAMA})`);
 }));
 
-module.exports = { parseCommand, norm };
+module.exports = { parseCommand, parseRoutine, norm, allowed, firstLine };
