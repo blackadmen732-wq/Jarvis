@@ -431,7 +431,30 @@ This installs the tools (xdotool, scrot, ImageMagick), starts the helper and mak
 >
 > **Be careful what you ask.** With control on, Jarvis can do anything you can: delete files, send messages, run commands. A log of every step is kept in `~/.local/state/jarvis-control.log`.
 
-## 12. Agents: your own team of bots
+## 12. Your own Claude and ChatGPT accounts
+
+A Claude Pro/Max or ChatGPT Plus subscription can't be plugged into other apps (that breaks the companies' rules and can get the account banned). But both companies make their own command-line apps that log in with your subscription: **Claude Code** and **Codex**. Install them once on your computer, and Jarvis uses them through Jarvis Hands:
+
+| Say | What happens |
+|---|---|
+| *"Switch to my Claude"* / *"switch to my ChatGPT"* | Jarvis's answers come from your own account (switch back: *"switch to auto router"*) |
+| *"Ask Claude Code to fix the bug in my website folder"* | Claude Code does the job on your computer, in your Jarvis work folder, and Jarvis reads you the gist |
+| *"Ask my ChatGPT to write a cover letter"* / *"Codex: …"* | Same, with your ChatGPT account through Codex |
+| *"Create an agent called builder that … every day at 9am using Claude Code"* | An agent whose brain is your Claude account (or *"with my ChatGPT"*) |
+
+**Set up once** (in the Linux terminal on a Chromebook):
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+then run `claude` once and log in with your Claude account. For ChatGPT:
+```bash
+sudo apt install -y npm && sudo npm install -g @openai/codex && codex login
+```
+- They use your subscription's own limits. A job can take a minute or more.
+- Claude Code may edit files and run commands in the work folder (`BRAIN_CLAUDE_MODE`, default `acceptEdits`, and `BRAIN_CLAUDE_TOOLS` control what it may do). Codex runs with `exec --full-auto` (`BRAIN_CODEX_ARGS`).
+- Other AI apps you pay for (Grok, Gemini): use their API keys in `.env` instead; their apps can't be connected.
+
+## 13. Agents: your own team of bots
 
 Like Grok Bot's team: each agent has **one job**, works on **your computer** (inside Jarvis Hands) in **its own folder**, and can run on a **routine**. Jarvis is the chief of staff: you talk to Jarvis, Jarvis hands out the work.
 

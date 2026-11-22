@@ -290,6 +290,37 @@
       "paid": true
     },
     {
+      "id": "my-claude",
+      "label": "Claude (your account)",
+      "group": "Your accounts",
+      "model": "cli/claude",
+      "aliases": [
+        "my claude",
+        "my claude account",
+        "claude account",
+        "claude code",
+        "claude subscription",
+        "my anthropic"
+      ],
+      "note": "your own Claude Pro/Max subscription, through Claude Code on your computer (needs Jarvis Hands)"
+    },
+    {
+      "id": "my-chatgpt",
+      "label": "ChatGPT (your account)",
+      "group": "Your accounts",
+      "model": "cli/codex",
+      "aliases": [
+        "my chatgpt",
+        "chatgpt",
+        "chat gpt",
+        "my chat gpt",
+        "chatgpt account",
+        "codex",
+        "my openai"
+      ],
+      "note": "your own ChatGPT subscription, through OpenAI's Codex on your computer (needs Jarvis Hands)"
+    },
+    {
       "id": "qwen7b",
       "label": "Qwen 7B Uncensored",
       "group": "Local",

@@ -138,6 +138,8 @@ const byId = id => allModels().find(m => m.id === id);
 // Who takes over when a model fails: your local model if it's downloaded, otherwise the first free cloud model that
 // hasn't just failed (a Chromebook usually has no local model, and a fallback that isn't there is no fallback).
 const CLOUD_FALLBACKS = ['groq', 'lightning', 'free', 'gemma26'];
+const isCli = m => !!m && String(m.model).startsWith('cli/');                // your own Claude / ChatGPT accounts
+const cliEngine = m => String(m.model).slice(4);                            // 'claude' or 'codex'
 
 // Daily free budgets per provider (models.json "daily_limits"): OpenRouter's free models share 50 a day, Gemini ~20,
 // Groq 1,000. Every request (chat, race, voice) is counted here, and the router stops using a provider before it
@@ -183,7 +185,7 @@ function notePerf(id, ttft, failed, lost = false) {
 function rankFor(job, exclude = []) {
   const recentFail = m => m.status && m.status.state === 'error' && Date.now() - (m.status.at || 0) < 3 * 60e3;
   return allModels()
-    .filter(m => m.id !== 'auto' && m.installed && !exclude.includes(m.id) && (config.allow_paid || !m.paid) && !recentFail(m) && budgetLeft(m.model) > 0)
+    .filter(m => m.id !== 'auto' && !isCli(m) && m.installed && !exclude.includes(m.id) && (config.allow_paid || !m.paid) && !recentFail(m) && budgetLeft(m.model) > 0)
     .map(m => {
       const jobs = m.jobs || ['chat'];
       const fit = jobs.includes(job) ? 3 : jobs.includes('chat') && job !== 'code' ? 1 : 0;
@@ -196,7 +198,7 @@ function rankFor(job, exclude = []) {
     .filter(x => x.score > -5).sort((a, b) => b.score - a.score).map(x => x.m);
 }
 // a concrete model for jobs that can't race (agents, Lina writer, Hands plans)
-const concrete = (entry, job = 'chat') => (entry && entry.id === 'auto' ? rankFor(job)[0] || allModels().find(m => m.id !== 'auto') : entry);
+const concrete = (entry, job = 'chat') => (entry && (entry.id === 'auto' || isCli(entry)) ? rankFor(job)[0] || allModels().find(m => m.id !== 'auto' && !isCli(m)) : entry);
 
 async function autoSpeak(send, message, system, messages, role) {
   const job = classifyJob(message), cands = rankFor(job).slice(0, 3);
@@ -308,7 +310,10 @@ async function resolveModel(query) {
 
 // "every day at 9am", "every morning", "every 30 minutes", "every hour" -> a routine; the rest is the job
 function parseRoutine(text) {
-  let s = String(text || '').trim(), every_minutes = null, at = null, m;
+  let s = String(text || '').trim(), every_minutes = null, at = null, m, engine = null;
+  if ((m = s.match(/\s*,?\s*\b(?:using|with|on|through)\s+(?:my\s+)?(claude code|claude account|claude|codex|chat ?gpt)(?: account)?\b/i))) {
+    engine = /codex|gpt/i.test(m[1]) ? 'codex' : 'claude'; s = s.replace(m[0], ' ').replace(/\s+/g, ' ').trim();   // the agent's brain
+  }
   const cut = re => { s = s.replace(re, ' ').replace(/\s+/g, ' ').replace(/^[\s,]+|[\s,.]+$/g, ''); };
   if ((m = s.match(/\b(?:every|each) (\d+) ?(minutes?|mins?|hours?|hrs?)\b/i))) { every_minutes = +m[1] * (/^h/i.test(m[2]) ? 60 : 1); cut(m[0]); }
   else if ((m = s.match(/\b(?:every|each) (minute|hour)\b|\bhourly\b/i))) { every_minutes = /minute/i.test(m[0]) ? 1 : 60; cut(m[0]); }
@@ -317,7 +322,7 @@ function parseRoutine(text) {
     if (m[4] && /p/i.test(m[4]) && h < 12) h += 12; if (m[4] && /a/i.test(m[4]) && h === 12) h = 0;
     at = `${String(h).padStart(2, '0')}:${mm}`; cut(m[0]);
   }
-  return { role: s, task: s, every_minutes, at };
+  return { role: s, task: s, every_minutes, at, engine };
 }
 
 function parseCommand(text) {
@@ -367,6 +372,10 @@ function parseCommand(text) {
   if (/^(stop|end|disable|close|turn off|exit)( the)? council|council (mode )?(off|stop)/.test(t)) return { action: 'council', on: false };
   if (/^(status|system status|report|diagnostics)$|^(which|what) model( are you| is active| are we)/.test(t)) return { action: 'status' };
   if (/^(list|show|what are)( the| my| your)? models|^what models/.test(t)) return { action: 'list' };
+  // Your own accounts (hands/brains.js): "ask Claude Code to ...", "ask my ChatGPT to ...", "Codex, ..."
+  if ((m = raw.match(/^(?:ask|tell|have|get|use)\s+(?:my\s+)?(claude code|claude account|my claude|claude|codex|chat ?gpt)(?: account)?\s+(?:to\s+)?(.+)$/i)) ||
+      (m = raw.match(/^(claude code|codex)\s*[,:]\s*(.+)$/i)))
+    return { action: 'brain', engine: /codex|gpt/i.test(m[1]) ? 'codex' : 'claude', text: m[2].trim().replace(/[.!?]+$/, '') };
   // Agents (hands/agents.js): Jarvis is the chief of staff of a team of bots that work on your computer
   if ((m = raw.match(/^(?:create|make|build|add|set up|spin up|hire)(?: me)?(?: a| an| new)* (?:agent|bot)(?: called| named)?\s+["']?([\w-]+)["']?\s*(?:,|:|that|to|who|which|whose job is to|for)?\s+(.+)$/i)))
     return { action: 'agent', op: 'create', name: m[1], ...parseRoutine(m[2]) };
@@ -569,12 +578,17 @@ async function handleChat(body, send) {
   }
   if (cmd && cmd.action === 'edgebot') return say(await edgebotReport());
   if (cmd && cmd.action === 'hands') return handsPlan(cmd.text, body.hands, send, say);
+  if (cmd && cmd.action === 'brain') {
+    if (!body.hands || !body.hands.cwd) return say('Your own Claude and ChatGPT accounts work through Claude Code and Codex on your computer, so Jarvis Hands needs to be running.');
+    send({ type: 'command', action: 'brain', engine: cmd.engine, prompt: cmd.text, system: '', label: cmd.engine === 'codex' ? 'ChatGPT (your account)' : 'Claude (your account)' });
+    return say(`Handing that to ${cmd.engine === 'codex' ? 'your ChatGPT through Codex' : 'your Claude through Claude Code'}. It works on your computer, so it can take a minute.`);
+  }
   if (cmd && cmd.action === 'agent') {
     if (!body.hands || !body.hands.cwd) return say('Agents live in Jarvis Hands on your computer. Run node hands/hands.js, then type: hands code, and the code it shows.');
     const brain = concrete(byId(state.active) || allModels()[0], 'code');
     send({ type: 'command', action: 'agent', ...cmd, model: cmd.op === 'create' ? brain.model : undefined });
     const when = cmd.at ? ` every day at ${cmd.at}` : cmd.every_minutes ? ` every ${cmd.every_minutes >= 60 && cmd.every_minutes % 60 === 0 ? cmd.every_minutes / 60 + ' hour' + (cmd.every_minutes > 60 ? 's' : '') : cmd.every_minutes + ' minutes'}` : '';
-    return say(({ create: `Hiring ${cmd.name}. Job: ${cmd.role}.${when ? ' Routine:' + when + '.' : ''} It thinks with ${brain.label}.`,
+    return say(({ create: `Hiring ${cmd.name}. Job: ${cmd.role}.${when ? ' Routine:' + when + '.' : ''} It thinks with ${cmd.engine ? (cmd.engine === 'codex' ? 'your ChatGPT, through Codex' : 'your Claude, through Claude Code') : brain.label}.`,
       run: `Sending ${cmd.name} off${cmd.task ? ' to ' + cmd.task : ' on its usual job'}. I'll report back.`, list: 'Here is the team.',
       delete: `Letting ${cmd.name} go.`, report: `Checking what ${cmd.name} did.` })[cmd.op]);
   }
@@ -587,6 +601,13 @@ async function handleChat(body, send) {
 
   const history = cleanHistory(body.history);
   const picked = byId(state.active) || allModels()[0];
+  if (!state.councilMode && isCli(picked)) {                       // answer with your own subscription, on your computer
+    if (!body.hands || !body.hands.cwd) return say(`${picked.label} runs through ${cliEngine(picked) === 'codex' ? 'Codex' : 'Claude Code'} on your computer, so Jarvis Hands needs to be running. Say "switch to auto router" to use the free models instead.`);
+    const recent = history.slice(-6).map(h => `${h.role === 'user' ? 'Mark' : me()}: ${h.content}`).join('\n');
+    send({ type: 'command', action: 'brain', engine: cliEngine(picked), label: picked.label, chat: true,
+      prompt: (recent ? `Conversation so far:\n${recent}\n\n` : '') + `Mark: ${message}`, system: `${persona()}\n\n${VOICE_RULES}` });
+    return;
+  }
   if (!state.councilMode && picked.id === 'auto') {
     const system = `${persona()}\n\n${VOICE_RULES}`;
     await autoSpeak(send, message, system, [...history, { role: 'user', content: message }], 'answer');

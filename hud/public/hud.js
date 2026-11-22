@@ -425,7 +425,8 @@
   let pendingLink = null;
   function linkCard(from, to) {
     const tag = (txt, cls) => `<span class="lc-tag ${cls}">${txt}</span>`;
-    const badge = m => m ? [m.local ? tag('LOCAL', 'local') : tag('CLOUD', 'cloud'), m.paid ? tag('PAID', 'paid') : tag('FREE', 'free')].join('') : '';
+    const badge = m => !m ? '' : String(m.model).startsWith('cli/') ? [tag('YOUR ACCOUNT', 'local'), tag('ON THIS COMPUTER', 'free')].join('')
+      : [m.local ? tag('LOCAL', 'local') : tag('CLOUD', 'cloud'), m.paid ? tag('PAID', 'paid') : tag('FREE', 'free')].join('');
     const el = document.createElement('div');
     el.className = 'link-card';
     el.innerHTML = `
@@ -476,7 +477,7 @@
   // This page (in YOUR browser, on your computer) is what talks to Jarvis Hands, never the server in Docker.
   // Pair once: start `node hands/hands.js`, then type "hands code <code>". Steps run straight away.
   const HANDS = 'http://localhost:3003';   // Jarvis Hands (terminal); laptop control is 3002
-  let handsToken = store.get('handsToken', ''), handsInfo = null, queuedStep = null, queuedAgent = null;
+  let handsToken = store.get('handsToken', ''), handsInfo = null, queuedStep = null, queuedAgent = null, queuedBrain = null;
   async function handsFetch(p, body) {
     const r = await fetch(HANDS + p, body ? { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': handsToken }, body: JSON.stringify(body) }
                                           : { headers: { 'x-jarvis-token': handsToken } });
@@ -550,7 +551,8 @@
       let run; try { run = (await handsFetch('/runs?id=' + encodeURIComponent(runId))).run; } catch { continue; }
       for (; shown < run.steps.length; shown++) {
         const st = run.steps[shown];
-        const head = st.action === 'run' ? `$ ${st.command}` : st.action === 'open' ? `open ${st.url}` : '(unclear reply, asked again)';
+        const head = st.action === 'run' ? `$ ${st.command}` : st.action === 'open' ? `open ${st.url}`
+          : st.action === 'brain' ? `${st.engine === 'codex' ? 'ChatGPT' : 'Claude'} (your account) worked on it:` : '(unclear reply, asked again)';
         addMsg('sys hands-out', `${name} · step ${shown + 1}`, `${head}${st.why ? '   # ' + st.why : ''}\n${String(st.result || '').trim()}`);
       }
       if (run.status !== 'running') { say(`${name}: ${run.summary || run.status}`); return; }
@@ -559,7 +561,7 @@
   async function agentOp(d) {
     try {
       if (d.op === 'create') {
-        const { agent: a } = await handsFetch('/agents', { name: d.name, role: d.role, task: d.task, model: d.model, every_minutes: d.every_minutes, at: d.at });
+        const { agent: a } = await handsFetch('/agents', { name: d.name, role: d.role, task: d.task, model: d.model, every_minutes: d.every_minutes, at: d.at, engine: d.engine || 'router' });
         say(`${a.name} is on the team. Job: ${a.role}. Routine: ${routineText(a)}. Say "ask ${a.name} to ..." to give it work.`);
       } else if (d.op === 'list') {
         const { agents, running } = await handsFetch('/agents');
@@ -581,6 +583,24 @@
       }
     } catch (e) { addMsg('err', 'Agents', e.message); }
   }
+  // your own Claude / ChatGPT accounts: Claude Code or Codex does the work on this computer (hands/brains.js)
+  async function runBrain(d) {
+    setState('thinking'); flowDir = 1;
+    const wait = addMsg('sys', d.label, d.chat ? 'Thinking…' : 'Working on it on your computer…');
+    let r; try { r = await handsFetch('/brain', { engine: d.engine, prompt: d.prompt, system: d.system || '' }); } catch (e) { r = { ok: false, text: e.message }; }
+    wait.remove();
+    if (!r.ok) { addMsg('err', d.label, r.text || 'no answer'); setState('idle'); return; }
+    if (d.chat) {
+      addMsg('', `${myName()} · ${d.label}`, r.text, ((r.ms || 0) / 1000).toFixed(1) + 's');
+      history.push({ role: 'user', content: d.prompt.split('Mark: ').pop() }, { role: 'assistant', content: r.text });
+      speakText(r.text);
+    } else {
+      addMsg('sys hands-out', `${d.label} · done`, r.text, ((r.ms || 0) / 1000).toFixed(1) + 's');
+      speakText(r.text.replace(/```[\s\S]*?```/g, ' ').split(/(?<=[.!?])\s+/).slice(0, 2).join(' '));   // the gist out loud
+    }
+    if (!speaking) setState('idle');
+  }
+
   // routines run on their own while Hands is on; tell Mark when one finishes
   let primed = false;                                   // the first check only notes runs that finished before
   setInterval(async () => {
@@ -673,6 +693,7 @@
             if (d.action === 'quality') { try { localStorage.setItem('jarvis.quality', JSON.stringify(d.level)); } catch {} notePref('quality'); if (window.JarvisScene) setTimeout(() => location.reload(), 4500); }
             if (d.action === 'assistant') { S.assistantLabel = d.label; applyAssistant(d.name); if (d.active) { S.active = d.active; render(); } chime(d.name === 'sophia' ? 740 : 520, d.name === 'sophia' ? 1110 : 780); }
             if (d.action === 'agent') queuedAgent = d;
+            if (d.action === 'brain') queuedBrain = d;
           } else if (d.type === 'council') {
             d.members.forEach((id, k) => setTimeout(() => beams.push({ from: S.active, to: id, life: 1.6 }), k * 150));
           } else if (d.type === 'done') {
@@ -689,6 +710,7 @@
     if (!speaking) setState(wakeOn ? 'idle' : 'idle');
     refreshState();
     if (queuedAgent) { const d = queuedAgent; queuedAgent = null; agentOp(d); }
+    if (queuedBrain) { const d = queuedBrain; queuedBrain = null; runBrain(d); }
     if (queuedStep) {                                   // run it on your computer, then explain the result
       const step = queuedStep; queuedStep = null;
       const r = await handsRun(step);

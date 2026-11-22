@@ -50,7 +50,8 @@ function create({ home, workdir, run, openUrl, lockedReason, log, sync = null })
       task: String(input.task || old.task || '').slice(0, 2000), model: String(input.model || old.model || 'open_router/openrouter/free'),
       every_minutes: every && every >= 1 ? Math.round(every) : null,
       at: /^\d{1,2}:\d{2}$/.test(String(input.at || '')) ? input.at : (input.at === null ? null : old.at || null),
-      enabled: input.enabled == null ? old.enabled !== false : !!input.enabled, created: old.created || new Date().toISOString() };
+      enabled: input.enabled == null ? old.enabled !== false : !!input.enabled, created: old.created || new Date().toISOString(),
+      engine: ['claude', 'codex'].includes(input.engine) ? input.engine : (input.engine === 'router' ? 'router' : old.engine || 'router') };
     fs.mkdirSync(folder(a), { recursive: true });
     save([...list.filter(x => x.id !== id), a]);
     return a;
@@ -100,6 +101,17 @@ function create({ home, workdir, run, openUrl, lockedReason, log, sync = null })
     running.set(a.id, id); put();
     (async () => {
       const messages = [{ role: 'user', content: `Task: ${rec.task}` }];
+      if (a.engine === 'claude' || a.engine === 'codex') {           // the brain is Mark's own Claude Code / Codex: it plans
+        const r = await require('./brains.js').think(a.engine, `Task: ${rec.task}`, {   // and works on its own, in this folder
+          system: `You are ${a.name}, one of Mark's agents (Jarvis is your chief of staff). Your job: ${a.role || 'help Mark'}. ` +
+                  `Work in this folder. End with a short summary for Mark (under 60 words).`, cwd: folder(a) });
+        rec.steps.push({ action: 'brain', engine: a.engine, result: String(r.text || '').slice(-3000) });
+        rec.status = r.ok ? 'done' : 'error'; rec.summary = String(r.text || '').trim().split('\n').filter(Boolean).slice(-4).join(' ').slice(-600);
+        rec.finished = new Date().toISOString(); put(); running.delete(a.id); if (sync) sync.pushRun(rec.id, a.id, rec);
+        const list = load(); const x = list.find(y => y.id === a.id);
+        if (x) { x.last_run = rec.id; x.last_status = rec.status; x.last_summary = rec.summary; x.last_at = rec.finished; save(list); }
+        return;
+      }
       try {
         for (let step = 0; step < MAX_STEPS; step++) {
           const reply = await think(a.model, system(a), messages);

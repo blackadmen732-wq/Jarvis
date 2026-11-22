@@ -89,6 +89,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (req.method === 'GET' && url.pathname === '/info')
     return send(200, { ok: true, version: VERSION, os: `${os.type()} ${os.release()} (${process.platform})`, shell: process.platform === 'win32' ? 'PowerShell' : path.basename(process.env.SHELL || 'sh'), cwd: WORKDIR });
+  if (req.method === 'GET' && url.pathname === '/brains') return send(200, { ok: true, brains: require('./brains.js').list() });
   if (req.method === 'GET' && url.pathname === '/agents')
     return send(200, { ok: true, agents: agents.load(), running: [...agents.running.keys()] });
   if (req.method === 'GET' && url.pathname === '/runs') {
@@ -114,6 +115,11 @@ const server = http.createServer(async (req, res) => {
     catch (e) { return send(400, { error: e.message }); }
   }
   try {
+    if (url.pathname === '/brain') {                     // your own Claude / ChatGPT account, via Claude Code / Codex
+      const r = await require('./brains.js').think(String(b.engine || ''), String(b.prompt || ''), { system: String(b.system || ''), cwd: WORKDIR });
+      log({ action: 'brain', engine: b.engine, ok: r.ok, ms: r.ms });
+      return send(200, r);
+    }
     if (url.pathname === '/agents') return send(200, { ok: true, agent: agents.upsert(b) });
     if (url.pathname === '/agents/delete') {
       const a = agents.find(b.name); if (!a) return send(404, { error: `no agent called ${b.name}` });
