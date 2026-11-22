@@ -362,6 +362,7 @@
     try {
       const r = await fetch('/api/state'); if (!r.ok) throw new Error();
       Object.assign(S, await r.json());
+      if (S.assistant) applyAssistant(S.assistant);
     } catch { S.router = { online: false }; }
     render();
   }
@@ -597,7 +598,7 @@
             flushSpeech();
             role = d.role;
             const kind = ({ member: 'member', verdict: 'verdict', system: 'sys' })[d.role] || '';
-            const who = d.role === 'member' ? `${d.label} · council` : d.role === 'verdict' ? `Jarvis verdict · ${d.label}` : d.role === 'system' ? 'Jarvis' : d.role === 'lina' ? `Lina writer · ${d.label}` : `Jarvis · ${d.label}`;
+            const who = d.role === 'member' ? `${d.label} · council` : d.role === 'verdict' ? `${myName()} verdict · ${d.label}` : d.role === 'system' ? (d.label || myName()) : d.role === 'lina' ? `Lina writer · ${d.label}` : `${myName()} · ${d.label}`;
             bubble = addMsg(kind + ' typing', who, ''); bubbleText = '';
             if (d.speaker !== 'jarvis') {
               if (S.councilMode && prevSpeaker && prevSpeaker !== d.speaker) beams.push({ from: prevSpeaker, to: d.speaker, life: 2.6 });
@@ -639,6 +640,8 @@
             if (d.action === 'hands_proposal') { addMsg('sys hands-out', 'Proposed step · waiting for "confirm"', d.step.action === 'open' ? `open ${d.step.url}` : `$ ${d.step.command}`); chime(520, 660); }
             if (d.action === 'hands_refused') { addMsg('err', 'Hands · locked', `$ ${d.command}\nRefused: ${d.reason}`); chime(300, 220); }
             if (d.action === 'hands_run') queuedStep = d.step;
+            if (d.action === 'quality') { try { localStorage.setItem('jarvis.quality', JSON.stringify(d.level)); } catch {} if (window.JarvisScene) setTimeout(() => location.reload(), 4500); }
+            if (d.action === 'assistant') { S.assistantLabel = d.label; applyAssistant(d.name); if (d.active) { S.active = d.active; render(); } chime(d.name === 'sophia' ? 740 : 520, d.name === 'sophia' ? 1110 : 780); }
             if (d.action === 'agent') queuedAgent = d;
           } else if (d.type === 'council') {
             d.members.forEach((id, k) => setTimeout(() => beams.push({ from: S.active, to: id, life: 1.6 }), k * 150));
@@ -663,6 +666,14 @@
     }
   }
   $('#form').addEventListener('submit', e => { e.preventDefault(); send($('#input').value); });
+  // voice first: the typing box stays hidden until the keyboard button or the first letter typed (outside other fields)
+  function setTyping(on) { $('#form').classList.toggle('typing', on); if (on) $('#input').focus(); }
+  $('#kbd').addEventListener('click', () => setTyping(!$('#form').classList.contains('typing')));
+  $('#input').addEventListener('blur', () => { setTimeout(() => { if (!$('#input').value && document.activeElement !== $('#input')) setTyping(false); }, 200); });
+  addEventListener('keydown', e => {
+    if ($('#form').classList.contains('typing') || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || /^(input|textarea|select)$/i.test(document.activeElement.tagName)) return;
+    setTyping(true);
+  });
 
   // ------------------------------------------------------------------ voice out (text-to-speech)
   const synth = window.speechSynthesis;
@@ -680,6 +691,29 @@
   const plain = s => s.replace(/```[\s\S]*?```/g, ' code block on screen. ').replace(/[*_#>`~|]/g, '').replace(/\[(.*?)\]\(.*?\)/g, '$1').replace(/\s+/g, ' ').trim();
   let engine = store.get('engine', 'browser'), studioVoice = store.get('studioVoice', 'bm_george'), studio = { online: false, voices: [] };
   let studioAudio = null, studioAnalyser = null, studioData = null, ttsLevel = 0;
+  // ---- two assistants, Jarvis and Sophia: each keeps her/his own voice (and the server keeps each one's model)
+  let assistant = store.get('assistant', 'jarvis');
+  function saveVoiceFor() { store.set('voice.' + assistant, { engine, studioVoice, voiceName }); }
+  function defaultVoiceFor(name) {
+    if (name !== 'sophia') return { engine: studio.online ? 'studio' : 'browser', studioVoice: 'bm_george', voiceName: null };
+    const sv = studio.online ? (studio.voices.find(v => v.id === 'af_heart') || studio.voices.find(v => v.gender === 'female')) : null;
+    const sys = synth ? synth.getVoices().find(v => kindOf(v) === 'female' && /^en/i.test(v.lang)) : null;
+    return { engine: sv ? 'studio' : 'browser', studioVoice: sv ? sv.id : 'af_heart', voiceName: sys ? sys.name : null };
+  }
+  function brand() {
+    const n = document.querySelector('.brand-name'); if (n) n.textContent = assistant === 'sophia' ? 'S.O.P.H.I.A' : 'J.A.R.V.I.S';
+    document.body.dataset.assistant = assistant; document.title = assistant === 'sophia' ? 'Sophia · Jarvis OS' : 'Jarvis OS';
+  }
+  function applyAssistant(name) {
+    if (!name || name === assistant) { brand(); return; }
+    saveVoiceFor(); assistant = name; store.set('assistant', name);
+    const v = store.get('voice.' + name, null) || defaultVoiceFor(name);
+    engine = v.engine; studioVoice = v.studioVoice; voiceName = v.voiceName; voice = null;
+    if (engine === 'studio' && !studio.online) engine = 'browser';
+    store.set('studioVoice', studioVoice); if (voiceName) store.set('voiceName', voiceName); store.set('engine', engine);
+    pickVoice(); brand(); renderVoices();
+  }
+  const myName = () => S.assistantLabel || (assistant === 'sophia' ? 'Sophia' : 'Jarvis');
   async function loadStudioVoices() {
     try { studio = await (await fetch('/api/voices')).json(); } catch { studio = { online: false, voices: [] }; }
     if (!studio.online && engine === 'studio') engine = 'browser';
@@ -757,7 +791,7 @@
         b.querySelector('.n').textContent = v.name;
         b.querySelector('.l').textContent = `${v.accent} · ${v.gender}${v.grade ? ' · grade ' + v.grade : ''}`;
         b.title = v.id;
-        b.addEventListener('click', () => { engine = 'studio'; studioVoice = v.id; store.set('engine', engine); store.set('studioVoice', v.id); renderVoices(); stopSpeaking(); speakText("Voice selected. Hello, I'm Jarvis."); });
+        b.addEventListener('click', () => { engine = 'studio'; studioVoice = v.id; store.set('engine', engine); saveVoiceFor(); store.set('studioVoice', v.id); renderVoices(); stopSpeaking(); speakText(`Voice selected. Hello, I'm ${myName()}.`); });
         b.addEventListener('mouseenter', () => fx('tick'));
         list.appendChild(b);
       }
@@ -778,7 +812,7 @@
       const k = kindOf(v);
       b.querySelector('.l').textContent = [v.lang, k !== 'other' ? k : '', NATURAL.test(v.name) ? 'natural' : '', v.localService ? 'offline' : 'online'].filter(Boolean).join(' · ');
       b.title = v.name;
-      b.addEventListener('click', () => { voice = v; voiceName = v.name; store.set('voiceName', v.name); engine = 'browser'; store.set('engine', engine); renderVoices(); stopSpeaking(); speakText("Voice selected. Hello, I'm Jarvis."); });
+      b.addEventListener('click', () => { voice = v; voiceName = v.name; store.set('voiceName', v.name); engine = 'browser'; store.set('engine', engine); saveVoiceFor(); renderVoices(); stopSpeaking(); speakText(`Voice selected. Hello, I'm ${myName()}.`); });
       b.addEventListener('mouseenter', () => fx('tick'));
       list.appendChild(b);
     }
@@ -877,12 +911,12 @@
     if (studio.online) {
       const pool = studio.voices.filter(v => (!want || v.gender === want) && (!accent || v.accent === accent));
       pick = studio.voices.find(v => words.some(w => v.name.toLowerCase() === w || v.id === w)) || (words.length ? null : pool[0]) || null;
-      if (pick) { engine = 'studio'; studioVoice = pick.id; store.set('engine', engine); store.set('studioVoice', pick.id); }
+      if (pick) { engine = 'studio'; studioVoice = pick.id; store.set('engine', engine); saveVoiceFor(); store.set('studioVoice', pick.id); }
     }
     if (!pick && synth) {
       const vs = synth.getVoices();
       const sys = vs.find(v => words.some(w => v.name.toLowerCase().includes(w))) || (words.length ? null : vs.find(v => (!want || kindOf(v) === want) && (!accent || (accent === 'British' ? /en-GB/i : /en-US/i).test(v.lang))));
-      if (sys) { pick = { name: sys.name }; voice = sys; voiceName = sys.name; engine = 'browser'; store.set('voiceName', sys.name); store.set('engine', engine); }
+      if (sys) { pick = { name: sys.name }; voice = sys; voiceName = sys.name; engine = 'browser'; store.set('voiceName', sys.name); store.set('engine', engine); saveVoiceFor(); }
     }
     renderVoices();
     const msg = pick ? `Voice changed to ${pick.name.replace(/^(Microsoft|Google)\s+/, '').replace(/\s*-.*$/, '')}. How do I sound?` : `I couldn't find a voice like "${query}". Open Voices to see them all.`;
@@ -949,10 +983,13 @@
     rec.lang = navigator.language || 'en-US'; rec.interimResults = false; rec.continuous = true;
     rec.onresult = e => {
       const text = e.results[e.results.length - 1][0].transcript.trim();
-      const m = text.match(/\bjarvis\b[\s,.!?]*(.*)$/i);
+      const m = text.match(/\b(jarvis|sophia)\b[\s,.!?]*(.*)$/i);          // either name wakes her/him up
       if (!m) return;
       stopRec();
-      if (m[1] && m[1].length > 2) send(m[1]); else { chime(880, 1180); startListening(); }
+      const who = m[1].toLowerCase();
+      if (m[2] && m[2].length > 2) send(`${who}, ${m[2]}`);
+      else if (who !== assistant) send(who);
+      else { chime(880, 1180); startListening(); }
     };
     rec.onend = () => { rec = null; recMode = null; if (wakeOn) setTimeout(startWake, 400); };
     rec.onerror = e => { if (e.error === 'not-allowed') { wakeOn = false; updateToggles(); } };
@@ -1017,8 +1054,8 @@
   $('#t-voice').addEventListener('click', () => { voiceOn = !voiceOn; store.set('voice', voiceOn); if (!voiceOn) stopSpeaking(); updateToggles(); });
   $('#t-wake').addEventListener('click', () => {
     if (!SR) { addMsg('sys', 'Jarvis', 'Wake word needs Chrome or Edge.'); return; }
-    wakeOn = !wakeOn; updateToggles();
-    if (wakeOn) { addMsg('sys', 'Jarvis', 'Listening for my name. Say "Jarvis" followed by your request.'); startWake(); } else if (recMode === 'wake') stopRec();
+    wakeOn = !wakeOn; store.set('wake', wakeOn); updateToggles();         // remembered: Mark talks more than he types
+    if (wakeOn) { addMsg('sys', myName(), 'Listening for our names. Say "Jarvis" or "Sophia" followed by your request.'); startWake(); } else if (recMode === 'wake') stopRec();
   });
   $('#t-council').addEventListener('click', () => command({ action: 'council', on: !S.councilMode }).then(updateToggles));
 
@@ -1110,6 +1147,8 @@
     onNodeClick: id => switchTo(id),
     fx: name => fx(name),
   };
+  brand();
+  if (store.get('wake', false) && SR) { wakeOn = true; updateToggles(); setTimeout(startWake, 1500); }   // wake word stays on between visits
   dispatchEvent(new Event('jarvis-ready'));
 
   // ---- control-room readouts: real data, refreshed a few times a second

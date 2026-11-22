@@ -47,7 +47,12 @@ You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) insta
    ```bash
    docker compose up -d
    ```
-5. Open **http://localhost:3000** and create your account. The first account becomes the admin.
+   That starts only the light parts: the Jarvis HUD (**http://localhost:3001**), the router, the Lina checker and the local-model engine. **Only what you use runs.** The hub below and the studio voices stay off until you turn them on, so a small laptop doesn't heat up for nothing:
+   ```bash
+   docker compose --profile hub --profile voices up -d
+   ```
+   To keep them on for good, put `COMPOSE_PROFILES=hub,voices` in `.env`. Local models leave memory 2 minutes after their last answer (`OLLAMA_KEEP_ALIVE`).
+5. With the hub on, open **http://localhost:3000** and create your account. The first account becomes the admin.
    The hub only accepts connections from this computer. To use it from your phone on the same Wi-Fi, make your admin account first, then change `"127.0.0.1:3000:8080"` to `"3000:8080"` in `docker-compose.yml` and run `docker compose up -d`.
 
 **Check it works:** click the model dropdown at the top. You should see a long list of models. Pick one ending in `:free` and say hi.
@@ -227,8 +232,8 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 - **Comms Log** (right): the conversation, including who said what.
 
 **Talking to it:**
-- Tap the **mic** (or press Ctrl+Space), speak, and it sends when you stop.
-- Turn on **Wake word** and just say *"Jarvis, …"* any time (the tab must stay open).
+- **Voice first:** the dock is just the mic. Tap it (or press Ctrl+Space), speak, and it sends when you stop. To type instead, press the ⌨ button or simply start typing anywhere; the box closes again when it's empty.
+- Turn on **Wake word** and just say *"Jarvis, …"* or *"Sophia, …"* any time (the tab must stay open). It stays on next time you open the HUD.
 - **Voice** on/off controls whether Jarvis speaks replies out loud.
 - **Voices ▾** opens the **Voice Studio**:
   - **Studio voices** (top): 55 natural voices (30 female, 25 male; American, British, Spanish, French, Italian, Hindi, Japanese, Portuguese, Mandarin), made on your computer by the free Kokoro engine (the `voice` service). Sorted best-quality first. With these, the reactor pulses to the *real* sound of the voice. Hear 4 of them: [`docs/voice-samples.mp3`](docs/voice-samples.mp3). Play with all of them at http://localhost:8880/web.
@@ -309,6 +314,18 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 **Safety:** the HUD only answers pages opened on this computer (`localhost:3001` or `127.0.0.1:3001`). Other websites you visit can't use it to switch models or spend your credit. To open it under another name, add it as `HUD_ALLOWED_HOSTS=name:3001` under `hud` → `environment` in `docker-compose.yml`.
 
 > **Privacy note:** Chrome and Edge send your *speech audio* to Google/Microsoft to turn it into text. The words Jarvis speaks back are made on your computer. If you want 100% offline voice, use the Jarvis desktop app (section 6) with your local model.
+
+### Sophia and Jarvis: two assistants
+
+Jarvis has a partner: **Sophia**. Same Grok-style personality ([`jarvis/sophia-persona.md`](jarvis/sophia-persona.md)), her own female voice, and her own model.
+- Say **"Sophia"** (or *"Sophia, what's the weather like on Mars?"*) and she answers; the header turns to **S.O.P.H.I.A**. Say **"Jarvis"** to switch back. *"Talk to Sophia"* and *"switch to Jarvis"* work too, and with the wake word on, both names wake the HUD.
+- Each one **remembers her/his own model and voice**: switch Sophia to Grok and Jarvis to a local model, and each keeps it. Pick her voice in **Voices ▾** while she's active (default: Kokoro's `af_heart` with studio voices on, otherwise your computer's first female voice).
+- "Serious mode" works for both.
+
+### Eco mode: no overheating
+
+The HUD works like a game's graphics settings. On a Chromebook, or any computer with 4 GB of RAM or 4 cores, it picks **eco** by itself: 30 frames a second, lighter glow, no film grain, the smaller sky picture. Everywhere it caps the frame rate, drops to a trickle after 20 seconds of nothing happening, stops completely when the tab is hidden, and lowers its resolution while frames run late. Hidden cores use no graphics power at all.
+- Say *"eco mode"* / *"battery mode"*, *"high quality"*, or *"auto quality"* (the page reloads in about 5 seconds). Or open `http://localhost:3001/?eco`.
 
 ## 9. Lina: rules for your bots, by voice
 

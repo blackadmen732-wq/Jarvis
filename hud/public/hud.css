@@ -337,3 +337,12 @@ body.bh-mode #t-play, body[data-scene="auto"] #t-play, body[data-scene="blackhol
 
 /* Jarvis Hands: commands and their output, shown exactly */
 .msg.hands-out .text { white-space: pre-wrap; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; max-height: 260px; overflow: auto; }
+
+/* voice-first dock (Mark talks, rarely types): just the mic; the typing box opens with the keyboard button or the first key press */
+.dock-input:not(.typing) { width: max-content; margin: 0 auto; padding: 6px 10px 6px 6px; }
+.dock-input:not(.typing) #input, .dock-input:not(.typing) .send { display: none; }
+.dock-input.typing .voice-hint { display: none; }
+.voice-hint { font: 500 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+.kbd { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--dim); font-size: 16px; cursor: pointer; }
+.kbd:hover, .dock-input.typing .kbd { color: var(--amber-hot); border-color: var(--amber); }
+@media (max-width: 520px) { .voice-hint { display: none; } }

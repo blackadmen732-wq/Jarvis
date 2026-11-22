@@ -93,8 +93,10 @@
     </div>
     <form class="dock-input" id="form" autocomplete="off">
       <button class="mic" id="mic" type="button" aria-label="Talk to Jarvis"><span></span></button>
-      <input id="input" type="text" placeholder="Speak or type a command…" aria-label="Message">
+      <span class="voice-hint" id="voice-hint">Say “Jarvis” or “Sophia”, or tap the mic</span>
+      <input id="input" type="text" placeholder="Type a command…" aria-label="Message">
       <button class="send" type="submit" aria-label="Send">➤</button>
+      <button class="kbd" id="kbd" type="button" aria-label="Type instead" title="Type instead (or just start typing)">⌨</button>
     </form>
   </footer>
 

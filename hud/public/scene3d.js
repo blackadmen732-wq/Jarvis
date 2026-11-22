@@ -54,9 +54,21 @@ function start() {
   const mobile = innerWidth < 860;
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  // ---------------------------------------------------------------- power governor (the way games avoid overheating)
+  // 1. pick a quality tier for this device once (Chromebook, 4 GB RAM or 4 cores -> eco), 2. cap the frame rate,
+  // 3. drop to a trickle when nothing is happening, stop completely in a hidden tab, 4. lower the resolution while
+  // frames are late and raise it again when there's headroom. Say "eco mode", "high quality" or "auto quality".
+  let qPref = 'auto'; try { qPref = JSON.parse(localStorage.getItem('jarvis.quality')) || 'auto'; } catch {}
+  if (new URLSearchParams(location.search).has('eco')) qPref = 'eco';
+  const weak = mobile || /CrOS/.test(navigator.userAgent) || (navigator.deviceMemory || 8) <= 4 || (navigator.hardwareConcurrency || 8) <= 4;
+  const tier = qPref === 'high' ? 'high' : qPref === 'eco' ? 'eco' : weak ? 'eco' : 'high';
+  const gov = tier === 'eco' ? { maxPR: 1, minPR: 0.5, fps: 30, idleFps: 12, msaa: 0, grain: false }
+                             : { maxPR: Math.min(devicePixelRatio || 1, mobile ? 1.5 : 2), minPR: 0.75, fps: 60, idleFps: 24, msaa: mobile ? 0 : 4, grain: true };
+  document.body.dataset.quality = tier;
+
   // ---------------------------------------------------------------- renderer
   const renderer = new THREE.WebGLRenderer({ antialias: false, stencil: false, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, mobile ? 1.5 : 2));
+  let pr = gov.maxPR; renderer.setPixelRatio(pr);
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.NoToneMapping;          // tone mapping happens in the post-processing chain
   host.appendChild(renderer.domElement);
@@ -68,7 +80,7 @@ function start() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#030508');
   // a real galaxy all around: ESO's Milky Way panorama (ESO/S. Brunier, CC BY 4.0)
-  const sky = createSky(scene, { mobile, src: mobile ? 'assets/milkyway-small.jpg' : 'assets/milkyway.jpg' });
+  const sky = createSky(scene, { mobile, src: mobile || tier === 'eco' ? 'assets/milkyway-small.jpg' : 'assets/milkyway.jpg' });
   scene.fog = new THREE.FogExp2(0x030508, 0.028);
   const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 1200);
   camera.position.set(0, mobile ? 4.2 : 3.0, mobile ? 21 : 12);
@@ -84,11 +96,13 @@ function start() {
   controls.addEventListener('end', () => { lastTouch = performance.now(); });
 
   // cinematic finishing (pmndrs/postprocessing): HDR buffers, smooth edges, soft mipmap bloom, AgX colour
-  const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType, multisampling: mobile ? 0 : 4 });
+  const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType, multisampling: gov.msaa });
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new BloomEffect({ mipmapBlur: true, intensity: 0.9, luminanceThreshold: 0.32, luminanceSmoothing: 0.35, radius: 0.72 });
   const grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: true }); grain.blendMode.opacity.value = 0.12;
-  composer.addPass(new EffectPass(camera, bloom, new VignetteEffect({ darkness: 0.62, offset: 0.28 }), grain, new ToneMappingEffect({ mode: ToneMappingMode.AGX })));
+  if (tier === 'eco') bloom.resolution.scale = 0.5;                       // half-size glow: looks the same, a quarter of the work
+  const finish = [bloom, new VignetteEffect({ darkness: 0.62, offset: 0.28 }), ...(gov.grain ? [grain] : []), new ToneMappingEffect({ mode: ToneMappingMode.AGX })];
+  composer.addPass(new EffectPass(camera, ...finish));
   composer.addPass(new EffectPass(camera, new SMAAEffect()));
 
   function frameView() {
@@ -699,16 +713,42 @@ function start() {
     controls.update();
     composer.render();
     labels.render(scene, camera);
-    requestAnimationFrame(tick);
   }
+
+  // the governor's loop: frame cap, idle trickle, hidden-tab stop, dynamic resolution
+  let lastFrame = 0, lastInput = performance.now(), running = true, ftAvg = 1000 / gov.fps, prT = 0, roomy = 0;
+  for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']) addEventListener(ev, () => { lastInput = performance.now(); }, { passive: true });
+  function loop(now) {
+    if (document.hidden) { running = false; return; }                  // nothing on screen: use nothing
+    requestAnimationFrame(loop);
+    const f = hud.getFrame();
+    const idle = f.uiState === 'idle' && !f.playOpen && now - lastInput > 20000;
+    const cap = idle ? gov.idleFps : gov.fps, budget = 1000 / cap;
+    const ft = now - lastFrame;
+    if (ft < budget - 1.5) return;                                     // too early: skip this screen refresh
+    lastFrame = now;
+    if (!idle && ft < 1000) {                                          // late frames -> fewer pixels; headroom -> more
+      ftAvg += (ft - ftAvg) * 0.1; prT += ft;
+      if (prT > 2000) {
+        prT = 0;
+        if (ftAvg > budget * 1.35 && pr > gov.minPR) { pr = Math.max(gov.minPR, pr * 0.85); roomy = 0; }
+        else if (ftAvg < budget * 1.1 && pr < gov.maxPR && ++roomy >= 3) { pr = Math.min(gov.maxPR, pr * 1.1); roomy = 0; }
+        else return tick();
+        renderer.setPixelRatio(pr); composer.setSize(innerWidth, innerHeight);
+      }
+    }
+    tick();
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !running) { running = true; lastFrame = 0; requestAnimationFrame(loop); } });
 
   document.body.classList.add('gl');
   window.JarvisScene = { ready: true, renderer, scene, camera,
     // voice / button entry: throw something from a random spot around the hole
     setView, setDensity: d => blackhole.setDensity(d),
     play: (type) => { if (type === 'clear') { play.clear(); blackhole.reset(); return; }
-      const a = Math.random() * Math.PI * 2; playAt(type, innerWidth / 2 + Math.cos(a) * innerWidth * 0.2, innerHeight * 0.46 + Math.sin(a) * innerHeight * 0.16); } };
-  requestAnimationFrame(tick);
+      const a = Math.random() * Math.PI * 2; playAt(type, innerWidth / 2 + Math.cos(a) * innerWidth * 0.2, innerHeight * 0.46 + Math.sin(a) * innerHeight * 0.16); },
+    quality: () => ({ tier, pixelRatio: pr, fps: gov.fps }) };
+  requestAnimationFrame(loop);
 }
 
 if (webglOK() && !new URLSearchParams(location.search).has('2d')) {

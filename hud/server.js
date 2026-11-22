@@ -20,6 +20,8 @@ const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:
 const CONFIG_PATH = process.env.HUD_CONFIG || path.join(__dirname, 'models.json');
 const PERSONA_PATH = process.env.PERSONA_PATH || path.join(__dirname, '..', 'jarvis', 'jarvis-persona.md');
 const GROK_PERSONA_PATH = process.env.GROK_PERSONA_PATH || path.join(__dirname, '..', 'jarvis', 'jarvis-persona-grok.md');
+const SOPHIA_PERSONA_PATH = process.env.SOPHIA_PERSONA_PATH || path.join(__dirname, '..', 'jarvis', 'sophia-persona.md');
+const ASSISTANTS = { jarvis: 'Jarvis', sophia: 'Sophia' };     // two assistants, each with her/his own voice and model
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_PATH = path.join(DATA_DIR, 'state.json');
 const RULES_PATH = path.join(DATA_DIR, 'rules.lina');            // Lina rules you confirmed by voice
@@ -40,6 +42,8 @@ const state = {
   active: saved.active || config.active || (config.models[0] && config.models[0].id),
   councilMode: !!saved.councilMode,
   personality: saved.personality || config.personality || 'grok',   // 'grok' (witty, blunt, no lectures) or 'classic'
+  assistant: ASSISTANTS[saved.assistant] ? saved.assistant : 'jarvis',  // who is talking: 'jarvis' or 'sophia'
+  activeBy: saved.activeBy || {},                                     // each assistant remembers her/his own model
   council: saved.council || config.council || [],
   extra: saved.extra || [],           // models added by voice ("switch to llama")
 };
@@ -57,9 +61,30 @@ let routerCatalog = { at: 0, ids: [] };
 
 function persona() {
   let p = '';
-  try { p = fs.readFileSync(state.personality === 'grok' ? GROK_PERSONA_PATH : PERSONA_PATH, 'utf8'); }
+  const sophia = state.assistant === 'sophia';
+  const file = sophia && state.personality === 'grok' ? SOPHIA_PERSONA_PATH : state.personality === 'grok' ? GROK_PERSONA_PATH : PERSONA_PATH;
+  try { p = fs.readFileSync(file, 'utf8'); }
   catch { try { p = fs.readFileSync(PERSONA_PATH, 'utf8'); } catch { p = 'You are Jarvis, a calm, witty personal AI assistant.'; } }
+  if (sophia && file !== SOPHIA_PERSONA_PATH) p = p.replace(/\bJarvis\b/g, 'Sophia');   // serious-mode Sophia
   return p.trim();
+}
+const me = () => ASSISTANTS[state.assistant] || 'Jarvis';
+
+// "Sophia, ..." / "Jarvis, ..." / "talk to Sophia" / "switch to Jarvis": who answers. Each keeps her/his own model.
+function pickAssistant(message) {
+  let m = String(message).match(/^\s*(?:hey |ok |okay |hi |yo )?(jarvis|sophia)\b[\s,:;.!?-]*(.*)$/is);
+  if (m) return { who: m[1].toLowerCase(), rest: m[2].trim() };
+  m = String(message).match(/^\s*(?:switch|change|go|pass me|put me through|give me|let me (?:talk|speak) to|talk to|speak to|i want)(?: (?:back |over ))?(?: to| with)? (jarvis|sophia)[.!?]*\s*$/i);
+  if (m) return { who: m[1].toLowerCase(), rest: '' };
+  return null;
+}
+function setAssistant(who) {
+  if (who === state.assistant) return false;
+  state.activeBy[state.assistant] = state.active;
+  state.assistant = who;
+  if (state.activeBy[who] && byId(state.activeBy[who])) state.active = state.activeBy[who];
+  else if (config[who + '_model'] && byId(config[who + '_model'])) state.active = config[who + '_model'];
+  saveState(); return true;
 }
 
 // ---------------------------------------------------------------- model list
@@ -161,6 +186,9 @@ function parseCommand(text) {
   const t = norm(text).replace(/^(hey |ok |okay )?jarvis\s*/, '');
   if (/^(?:switch to |turn on |go |be |use |enable )?(?:the )?(grok|rebel|fun|unfiltered|spicy) (mode|personality)( on)?$/.test(t)) return { action: 'personality', personality: 'grok' };
   if (/^(?:switch to |turn on |go |be |use |enable )?(?:the )?(serious|polite|formal|calm|butler) (mode|personality)( on)?$|^(grok|rebel|fun) mode off$/.test(t)) return { action: 'personality', personality: 'classic' };
+  if (/^(?:switch to |turn on |go |use |set )?(?:the )?(eco|battery|power saving|low power|performance|cool|quiet)(?: mode| quality)?( on)?$/.test(t)) return { action: 'quality', level: 'eco' };
+  if (/^(?:switch to |turn on |go |use |set )?(?:the )?(high|full|max|maximum|best|ultra) (quality|graphics|detail|mode)$|^(eco|battery) mode off$/.test(t)) return { action: 'quality', level: 'high' };
+  if (/^(?:switch to |use |set )?(?:the )?auto(?:matic)? (quality|graphics)$/.test(t)) return { action: 'quality', level: 'auto' };
   if (/^(confirm|confirmed|save it|yes save( it)?|save the rule|keep it)$/.test(t)) return { action: 'lina_confirm' };
   if (/^(cancel|discard( it)?|never mind|forget it|don t save( it)?)$/.test(t)) return { action: 'lina_cancel' };
   if (/^(list|show|read)( me)?( my| the)? (lina )?rules$/.test(t)) return { action: 'lina_list' };
@@ -314,22 +342,35 @@ function directAction(msg) {
 }
 
 async function handleChat(body, send) {
-  const message = String(body.message || '').trim().slice(0, 4000);
+  let message = String(body.message || '').trim().slice(0, 4000);
   if (!message) return send({ type: 'done' });
+  const say = text => { send({ type: 'start', speaker: 'jarvis', label: me(), group: 'System', role: 'system' }); send({ type: 'token', speaker: 'jarvis', text }); send({ type: 'end', speaker: 'jarvis' }); };
+  const who = !body.hands_result && pickAssistant(message);
+  if (who) {
+    const changed = setAssistant(who.who);
+    if (changed) send({ type: 'command', action: 'assistant', name: who.who, label: me(), active: state.active });
+    if (!who.rest) return say(who.who === 'sophia' ? (changed ? "Sophia here. Jarvis was boring you, wasn't he?" : "Still me. What do you need?") : (changed ? 'Jarvis here, sir. Back to business.' : 'At your service.'));
+    message = who.rest;
+  }
   const cmd = parseCommand(message);
-  const say = text => { send({ type: 'start', speaker: 'jarvis', label: 'Jarvis', group: 'System', role: 'system' }); send({ type: 'token', speaker: 'jarvis', text }); send({ type: 'end', speaker: 'jarvis' }); };
 
   if (cmd && cmd.action === 'switch') {
     const m = await resolveModel(cmd.query);
     if (!m) return say(`I couldn't find a model called ${cmd.query}. Say "list models" to hear the options.`);
     if (m.local && !localModels.includes(m.model.slice(7))) return say(`${m.label} isn't downloaded yet. Run the add-model script first.`);
-    state.active = m.id; saveState();
+    state.active = m.id; state.activeBy[state.assistant] = m.id; saveState();
     send({ type: 'command', action: 'switch', id: m.id, label: m.label });
     return say(`Switching to ${m.label}${m.paid ? ', which uses paid credit' : ''}. Routing established.`);
   }
   if (cmd && cmd.action === 'personality') {
     state.personality = cmd.personality; saveState();
     return say(cmd.personality === 'grok' ? 'Grok mode. Filters off, jokes on. What are we breaking today?' : 'Serious mode, sir. Calm and polite from here on.');
+  }
+  if (cmd && cmd.action === 'quality') {
+    send({ type: 'command', action: 'quality', level: cmd.level });
+    return say(({ eco: 'Eco mode: 30 frames a second, lighter effects, and I go quiet when you do. Your laptop stays cool.',
+      high: 'Full quality. Every effect on, 60 frames a second. Hope your fans are ready.',
+      auto: "Auto quality: I'll choose eco on a Chromebook or a small laptop and full quality on a strong one." })[cmd.level]);
   }
   if (cmd && cmd.action === 'theme') { send({ type: 'command', action: 'theme', theme: cmd.theme }); return; }
   if (cmd && cmd.action === 'scene') { send({ type: 'command', action: 'scene', scene: cmd.scene }); return; }
@@ -363,7 +404,7 @@ async function handleChat(body, send) {
   if (cmd && cmd.action === 'status') {
     const a = byId(state.active);
     const okCount = allModels().filter(m => m.status.state === 'ok').length;
-    return say(`Running on ${a ? a.label : 'nothing'}, ${state.personality === 'grok' ? 'Grok' : 'serious'} personality. Router ${routerOnline ? 'online' : 'offline'}, local engine ${localOnline ? 'online with ' + localModels.length + ' models' : 'offline'}. ${okCount} links confirmed working. Council mode is ${state.councilMode ? 'on' : 'off'}.`);
+    return say(`${me()} here, running on ${a ? a.label : 'nothing'}, ${state.personality === 'grok' ? 'Grok' : 'serious'} personality. Router ${routerOnline ? 'online' : 'offline'}, local engine ${localOnline ? 'online with ' + localModels.length + ' models' : 'offline'}. ${okCount} links confirmed working. Council mode is ${state.councilMode ? 'on' : 'off'}.`);
   }
   if (cmd && cmd.action === 'lina') return linaRule(cmd.text, send, say);
   if (cmd && cmd.action === 'lina_confirm') {
@@ -610,7 +651,7 @@ function json(res, code, obj) {
 }
 function publicState() {
   return {
-    active: state.active, councilMode: state.councilMode, personality: state.personality, council: state.council, fallback: config.fallback,
+    active: state.active, councilMode: state.councilMode, personality: state.personality, assistant: state.assistant, assistantLabel: me(), council: state.council, fallback: config.fallback,
     router: { online: routerOnline, url: ROUTER }, local: { online: localOnline, models: localModels },
     models: allModels(),
   };
@@ -641,7 +682,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/tts' && req.method === 'POST') return studioSpeech(await readBody(req), res);
     if (url.pathname === '/api/command' && req.method === 'POST') {
       const b = await readBody(req);
-      if (b.action === 'switch' && byId(b.id)) state.active = b.id;
+      if (b.action === 'switch' && byId(b.id)) { state.active = b.id; state.activeBy[state.assistant] = b.id; }
       else if (b.action === 'council') state.councilMode = !!b.on;
       else if (b.action === 'councilMembers' && Array.isArray(b.ids)) state.council = b.ids.filter(id => byId(id)).slice(0, 4);
       else return json(res, 400, { error: 'unknown command' });
