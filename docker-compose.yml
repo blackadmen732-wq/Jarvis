@@ -93,7 +93,8 @@ services:
       LINA_URL: http://lina:8090
     volumes:
       - ./hud/models.json:/app/models.json:ro          # edit favourites, then restart hud
-      - ./jarvis/jarvis-persona.md:/app/persona.md:ro  # Jarvis's personality
+      - ./jarvis/jarvis-persona.md:/app/persona.md:ro  # Jarvis's personality (serious mode)
+      - ./jarvis/jarvis-persona-grok.md:/app/persona-grok.md:ro  # Grok mode (the default)
       - hud:/data                                      # remembers active model + council
 
   # Studio voices: 50+ natural voices (Kokoro-82M), free, runs on this computer.

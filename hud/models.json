@@ -1,7 +1,8 @@
 {
-  "_help": "Your favourite models. 'model' is provider/model as the router knows it. 'aliases' are words you can say: 'Jarvis, switch to <alias>'. 'group' picks the colour family on the HUD. Local Ollama models you download are added automatically. 'lina_writer' is the model that turns your spoken rules into Lina (the Lina checker always has the final word).",
+  "_help": "Your favourite models. 'model' is provider/model as the router knows it. 'aliases' are words you can say: 'Jarvis, switch to <alias>'. 'group' picks the colour family on the HUD. Local Ollama models you download are added automatically. 'lina_writer' is the model that turns your spoken rules into Lina (the Lina checker always has the final word). 'personality' is Jarvis's default style: 'grok' (witty, blunt, no lectures) or 'classic'; switch by voice with \"Grok mode\" / \"serious mode\".",
   "active": "groq",
   "lina_writer": "groq",
+  "personality": "grok",
   "fallback": "qwen7b",
   "council": [
     "nemotron",
@@ -88,6 +89,24 @@
         "gemini",
         "google"
       ]
+    },
+    {
+      "id": "grok",
+      "label": "Grok 4.7",
+      "group": "xAI",
+      "model": "open_router/x-ai/grok-4.7",
+      "aliases": ["grok", "grok 4.7", "x ai", "xai", "elon", "elon's model"],
+      "paid": true,
+      "note": "the real Grok, through OpenRouter (pay per use: about $2 per million words in, $6 out)"
+    },
+    {
+      "id": "grok-lite",
+      "label": "Grok 4.3",
+      "group": "xAI",
+      "model": "open_router/x-ai/grok-4.3",
+      "aliases": ["grok 4.3", "cheap grok", "grok lite"],
+      "paid": true,
+      "note": "cheaper Grok (about $1.25 in, $2.50 out per million words)"
     },
     {
       "id": "claude",

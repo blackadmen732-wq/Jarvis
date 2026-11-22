@@ -140,6 +140,8 @@ The hub ships with a dark navy + cyan theme ([`theme/custom.css`](theme/custom.c
 
 ## 5. Create the "Jarvis" personality
 
+> The HUD has its own personality switch: **Grok mode** (the default, [`jarvis/jarvis-persona-grok.md`](jarvis/jarvis-persona-grok.md): witty, blunt, answers the questions other assistants dodge, no lectures) and **serious mode** ([`jarvis/jarvis-persona.md`](jarvis/jarvis-persona.md)). Say *"Grok mode"* or *"serious mode"*. Edit either file to change how Jarvis talks, then `docker compose restart hud`. The steps below set up the personality for the hub and the desktop app.
+
 This makes a model called **jarvis** that every app (including the voice assistant) can use.
 
 1. In the hub: **Workspace → Models → +**.
@@ -261,6 +263,8 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 |---|---|
 | "Jarvis, switch to Groq" / "use the uncensored model" / "switch to Kimi" | Routes to that model (any name or nickname in `hud/models.json`, or any model the router knows) |
 | "Start the council" / "council off" | Council mode on/off |
+| "Grok mode" / "rebel mode" (default) · "serious mode" | Jarvis's personality: witty, blunt, no lectures · or the calm, polite butler |
+| "Switch to Grok" / "use Grok 4.3" | The real Grok (xAI) through OpenRouter: **paid**, add credit at openrouter.ai first |
 | "Status" | Which model is active, what's online |
 | "List models" | Reads out your models |
 | "Use a female voice" / "switch voice to George" | Changes Jarvis's voice |
