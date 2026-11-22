@@ -608,6 +608,7 @@
     ['GEMINI_API_KEY', 'Gemini (free, small)', 'https://aistudio.google.com/apikey'],
     ['NVIDIA_NIM_API_KEY', 'NVIDIA (Nemotron, Kimi)', 'https://build.nvidia.com/settings/api-keys'],
     ['ZAI_API_KEY', 'Z.ai (GLM)', 'https://z.ai/manage-apikey/apikey-list'],
+    ['ELEVENLABS_API_KEY', 'ElevenLabs (Jarvis and Sophia voices)', 'https://elevenlabs.io/app/settings/api-keys'],
     ['JARVIS_SYNC_TOKEN', 'Supabase sync code (your own random code)', ''],
   ];
   async function openKeys() {
@@ -652,6 +653,11 @@
 
   // ------------------------------------------------------------------ chat
   let busy = false;
+  // Conversation mode (Mark: "don't make me tap again every time"): once he talks by voice, the mic opens again by
+  // itself after each reply, so it's a back-and-forth like a phone call. A silent turn, "stop", Esc or typing ends it.
+  let convo = false;
+  const ENDS_CONVO = /^(?:(?:jarvis|sophia)[,\s]+)?(?:stop( listening)?|goodbye|bye|that'?s all|thanks,? that'?s all|never ?mind|go to sleep)[.!]?$/i;
+  function followUp() { if (convo) setTimeout(() => { if (convo && !busy && !speaking && !rec) startListening(); }, 350); }
   async function send(text, extra = null) {
     text = String(text || '').trim();
     if (!text || busy) return;
@@ -749,6 +755,7 @@
     if (!speaking) setState(wakeOn ? 'idle' : 'idle');
     refreshState();
     if (queuedAgent) { const d = queuedAgent; queuedAgent = null; agentOp(d); }
+    if (!speaking) followUp();                                  // nothing to say out loud (voice off): listen again now
     if (queuedBrain) { const d = queuedBrain; queuedBrain = null; runBrain(d); }
     if (queuedStep) {                                   // run it on your computer, then explain the result
       const step = queuedStep; queuedStep = null;
@@ -756,7 +763,7 @@
       if (r) send('result', { hands_result: r });
     }
   }
-  $('#form').addEventListener('submit', e => { e.preventDefault(); send($('#input').value); });
+  $('#form').addEventListener('submit', e => { e.preventDefault(); convo = false; send($('#input').value); });
   // voice first: the typing box stays hidden until the keyboard button or the first letter typed (outside other fields)
   function setTyping(on) { $('#form').classList.toggle('typing', on); if (on) $('#input').focus(); }
   $('#kbd').addEventListener('click', () => setTyping(!$('#form').classList.contains('typing')));
@@ -786,7 +793,9 @@
   let assistant = store.get('assistant', 'jarvis');
   function saveVoiceFor() { store.set('voice.' + assistant, { engine, studioVoice, voiceName }); }
   function defaultVoiceFor(name) {
-    // default to voices that cost nothing: Kokoro (if running) or the browser's own; cloud voices only when Mark picks them
+    // Mark's own ElevenLabs voice first (he asked for it), else voices that cost nothing: Kokoro or the browser's own
+    const el = studio.online && studio.voices.find(v => v.id === 'el_' + (name === 'sophia' ? 'sophia' : 'jarvis'));
+    if (el) return { engine: 'studio', studioVoice: el.id, voiceName: null };
     const local = studio.online ? studio.voices.filter(v => !v.cloud) : [];
     if (name !== 'sophia') { const g = local.find(v => v.id === 'bm_george') || local.find(v => v.gender === 'male'); return { engine: g ? 'studio' : 'browser', studioVoice: g ? g.id : 'bm_george', voiceName: null }; }
     const sv = local.find(v => v.id === 'af_heart') || local.find(v => v.gender === 'female');
@@ -810,6 +819,13 @@
   async function loadStudioVoices() {
     try { studio = await (await fetch('/api/voices')).json(); } catch { studio = { online: false, voices: [] }; }
     if (!studio.online && engine === 'studio') engine = 'browser';
+    // the first time Mark's ElevenLabs voices show up, switch both assistants to them once (he can still pick another)
+    if (studio.voices.some(v => /^el_/.test(v.id)) && !store.get('elAdopted', false)) {
+      store.set('elAdopted', true);
+      for (const n of ['jarvis', 'sophia']) store.set('voice.' + n, defaultVoiceFor(n));
+      const v = defaultVoiceFor(assistant); engine = v.engine; studioVoice = v.studioVoice;
+      store.set('engine', engine); store.set('studioVoice', studioVoice);
+    }
     renderVoices();
   }
   function studioFetch(text) {
@@ -829,7 +845,7 @@
     if (engine !== 'studio' && !synth) return;
     const parts = plain(text).match(/[^.!?]+[.!?]*\s*/g) || [];
     let chunk = '';
-    const limit = engine === 'studio' && /^fish_/.test(studioVoice) ? 1200 : 220;   // cloud voices: one request per reply (daily limit)
+    const limit = engine === 'studio' && /^(fish|el)_/.test(studioVoice) ? 1200 : 220;   // cloud voices: one request per reply (daily limit)
     for (const p of parts) { if ((chunk + p).length > limit) { speechQueue.push(chunk); chunk = ''; } chunk += p; }
     if (chunk.trim()) speechQueue.push(chunk);
     // studio voices: start generating audio for every chunk right away so playback is gapless
@@ -838,7 +854,7 @@
   }
   async function nextSpeech() {
     const item = speechQueue.shift();
-    if (!item) { speaking = false; ttsLevel = 0; if (!busy) setState('idle'); resumeWake(); return; }
+    if (!item) { speaking = false; ttsLevel = 0; if (!busy) setState('idle'); if (convo && !busy) followUp(); else resumeWake(); return; }
     speaking = true; pauseWake();
     if (typeof item === 'object') {
       const blob = await item.audio;
@@ -1063,7 +1079,8 @@
     rec.onend = () => {
       mic.classList.remove('live'); rec = null; recMode = null;
       const heard = finalHeard.trim();
-      if (heard) send(heard); else { if (uiState === 'listening') setState('idle'); resumeWake(); }
+      if (heard) { convo = !ENDS_CONVO.test(heard); if (convo) send(heard); else { stopSpeaking(); setState('idle'); resumeWake(); } }
+      else { convo = false; if (uiState === 'listening') setState('idle'); resumeWake(); }
     };
     try { rec.start(); mic.classList.add('live'); setState('listening'); chime(880, 1180); } catch {}
   }
@@ -1080,7 +1097,7 @@
       const m = text.match(/\b(jarvis|sophia)\b[\s,.!?]*(.*)$/i);          // either name wakes her/him up
       if (!m) return;
       stopRec();
-      const who = m[1].toLowerCase();
+      const who = m[1].toLowerCase(); convo = true;
       if (m[2] && m[2].length > 2) send(`${who}, ${m[2]}`);
       else if (who !== assistant) send(who);
       else { chime(880, 1180); startListening(); }
@@ -1096,7 +1113,7 @@
   document.addEventListener('keydown', e => {
     if (e.key === '/' && document.activeElement !== $('#input')) { e.preventDefault(); $('#input').focus(); }
     if (e.code === 'Space' && e.ctrlKey) { e.preventDefault(); mic.click(); }
-    if (e.key === 'Escape') { stopSpeaking(); stopRec(); setState('idle'); if (ctrlOn) send('stop control'); }
+    if (e.key === 'Escape') { convo = false; stopSpeaking(); stopRec(); setState('idle'); if (ctrlOn) send('stop control'); }
   });
 
   // ------------------------------------------------------------------ toggles

@@ -42,7 +42,7 @@ const LOCKED = [
 ];
 // ---- the Keys form (HUD -> Hands): API keys go straight into Jarvis's .env on this computer. Only these names,
 // one line each; the values are never sent back (the HUD only learns which keys are set).
-const KEY_NAMES = ['GROQ_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_NIM_API_KEY', 'ZAI_API_KEY', 'CEREBRAS_API_KEY', 'JARVIS_SYNC_TOKEN'];
+const KEY_NAMES = ['GROQ_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_NIM_API_KEY', 'ZAI_API_KEY', 'CEREBRAS_API_KEY', 'ELEVENLABS_API_KEY', 'JARVIS_SYNC_TOKEN'];
 const REPO = path.join(__dirname, '..');
 const ENV_FILE = path.join(REPO, '.env');
 function readEnv() {
