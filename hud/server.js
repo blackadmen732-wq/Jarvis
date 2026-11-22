@@ -23,6 +23,7 @@ const GROK_PERSONA_PATH = process.env.GROK_PERSONA_PATH || path.join(__dirname, 
 const SOPHIA_PERSONA_PATH = process.env.SOPHIA_PERSONA_PATH || path.join(__dirname, '..', 'jarvis', 'sophia-persona.md');
 const ASSISTANTS = { jarvis: 'Jarvis', sophia: 'Sophia' };     // two assistants, each with her/his own voice and model
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const noKey = new Set();   // providers with no key in .env yet (see cleanError)
 const STATE_PATH = path.join(DATA_DIR, 'state.json');
 const RULES_PATH = path.join(DATA_DIR, 'rules.lina');            // Lina rules you confirmed by voice
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -129,8 +130,11 @@ function allModels() {
   for (const e of state.extra) if (!known.has(e.model)) { known.add(e.model); list.push(e); }
   return list.map(m => {
     const isLocal = m.model.startsWith('ollama/');
-    const installed = isLocal ? localModels.includes(m.model.slice(7)) : true;
-    return { ...m, local: isLocal, installed, status: status[m.id] || { state: installed ? 'ready' : 'missing' } };
+    const keyless = !isLocal && noKey.has(providerOf(m.model));
+    const installed = isLocal ? localModels.includes(m.model.slice(7)) : !keyless;
+    return { ...m, local: isLocal, installed,
+      status: keyless ? { state: 'error', error: 'no key yet: press KEYS', at: (status[m.id] && status[m.id].at) || Date.now() }
+        : status[m.id] || { state: installed ? 'ready' : 'missing' } };
   });
 }
 const byId = id => allModels().find(m => m.id === id);
@@ -424,8 +428,17 @@ async function* streamModel(entry, system, messages, maxTokens = 700, cancel = n
   }
 }
 
+// Providers whose key isn't in .env yet (learned from the router's "X_API_KEY is not set"). Auto, fallbacks and the
+// council skip them until the HUD restarts, which the Keys form does after saving a key.
 function cleanError(msg) {
   const s = String(msg || 'error').split('\n')[0];
+  const k = s.match(/\b([A-Z][A-Z0-9_]*_API_KEY) is not set/);
+  if (k) {
+    const p = { NVIDIA_NIM_API_KEY: 'nvidia_nim', OPENROUTER_API_KEY: 'open_router', GROQ_API_KEY: 'groq', GEMINI_API_KEY: 'gemini',
+      CEREBRAS_API_KEY: 'cerebras', ZAI_API_KEY: 'zai' }[k[1]];
+    if (p) noKey.add(p);
+    return `no ${k[1]} yet: press KEYS (or say "open my keys") and paste it`;
+  }
   if (/429|rate.?limit/i.test(s)) return 'rate limited (free quota used up or busy)';
   if (/401|403|auth|api key/i.test(s)) return 'key missing or not accepted';
   if (/402|credit/i.test(s)) return 'needs credit on that account';
@@ -789,10 +802,12 @@ const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY || '';
 function elevenVoices() {
   const ids = (config.tts && config.tts.elevenlabs) || {};
   if (!ELEVEN_KEY) return [];
-  return [
-    ids.jarvis && { id: 'el_jarvis', name: 'Jarvis (ElevenLabs)', accent: 'British', gender: 'male', grade: 'cloud', cloud: true },
-    ids.sophia && { id: 'el_sophia', name: 'Sophia (ElevenLabs)', accent: 'American', gender: 'female', grade: 'cloud', cloud: true },
-  ].filter(Boolean);
+  // keys like jarvis, jarvis2, sophia, sophia2: the first of each is that assistant's default voice
+  return Object.keys(ids).filter(k => /^(jarvis|sophia)\d?$/.test(k) && ids[k]).map(k => {
+    const sophia = k.startsWith('sophia'), n = k.replace(/\D/g, '');
+    return { id: 'el_' + k, name: `${sophia ? 'Sophia' : 'Jarvis'}${n ? ' ' + n : ''} (ElevenLabs)`, accent: sophia ? 'American' : 'British',
+      gender: sophia ? 'female' : 'male', grade: 'cloud', cloud: true };
+  });
 }
 const cloudList = () => [...(OPENROUTER_KEY ? CLOUD_VOICES : []), ...elevenVoices()];
 async function elevenSpeech(voice, text, speed, res) {
@@ -843,7 +858,7 @@ async function studioSpeech(body, res) {
   const voice = String(body.voice || 'bm_george').replace(/[^a-z0-9_+()., ]/gi, '').slice(0, 80);
   const speed = Math.min(1.6, Math.max(0.6, Number(body.speed) || 1));
   if (!text) { res.writeHead(400); return res.end(); }
-  if (/^el_(jarvis|sophia)$/.test(voice)) {
+  if (/^el_(jarvis|sophia)\d?$/.test(voice)) {
     try { return await elevenSpeech(voice, text, speed, res); } catch (e) { return json(res, 502, { error: 'ElevenLabs voice failed: ' + e.message }); }
   }
   if (/^fish_(jarvis|sophia)$/.test(voice)) {

@@ -653,6 +653,11 @@
 
   // ------------------------------------------------------------------ chat
   let busy = false;
+  // Conversation mode (Mark: "don't make me tap again every time"): once he talks by voice, the mic opens again by
+  // itself after each reply, so it's a back-and-forth like a phone call. A silent turn, "stop", Esc or typing ends it.
+  let convo = false;
+  const ENDS_CONVO = /^(?:(?:jarvis|sophia)[,\s]+)?(?:stop( listening)?|goodbye|bye|that'?s all|thanks,? that'?s all|never ?mind|go to sleep)[.!]?$/i;
+  function followUp() { if (convo) setTimeout(() => { if (convo && !busy && !speaking && !rec) startListening(); }, 350); }
   async function send(text, extra = null) {
     text = String(text || '').trim();
     if (!text || busy) return;
@@ -750,6 +755,7 @@
     if (!speaking) setState(wakeOn ? 'idle' : 'idle');
     refreshState();
     if (queuedAgent) { const d = queuedAgent; queuedAgent = null; agentOp(d); }
+    if (!speaking) followUp();                                  // nothing to say out loud (voice off): listen again now
     if (queuedBrain) { const d = queuedBrain; queuedBrain = null; runBrain(d); }
     if (queuedStep) {                                   // run it on your computer, then explain the result
       const step = queuedStep; queuedStep = null;
@@ -757,7 +763,7 @@
       if (r) send('result', { hands_result: r });
     }
   }
-  $('#form').addEventListener('submit', e => { e.preventDefault(); send($('#input').value); });
+  $('#form').addEventListener('submit', e => { e.preventDefault(); convo = false; send($('#input').value); });
   // voice first: the typing box stays hidden until the keyboard button or the first letter typed (outside other fields)
   function setTyping(on) { $('#form').classList.toggle('typing', on); if (on) $('#input').focus(); }
   $('#kbd').addEventListener('click', () => setTyping(!$('#form').classList.contains('typing')));
@@ -848,7 +854,7 @@
   }
   async function nextSpeech() {
     const item = speechQueue.shift();
-    if (!item) { speaking = false; ttsLevel = 0; if (!busy) setState('idle'); resumeWake(); return; }
+    if (!item) { speaking = false; ttsLevel = 0; if (!busy) setState('idle'); if (convo && !busy) followUp(); else resumeWake(); return; }
     speaking = true; pauseWake();
     if (typeof item === 'object') {
       const blob = await item.audio;
@@ -1073,7 +1079,8 @@
     rec.onend = () => {
       mic.classList.remove('live'); rec = null; recMode = null;
       const heard = finalHeard.trim();
-      if (heard) send(heard); else { if (uiState === 'listening') setState('idle'); resumeWake(); }
+      if (heard) { convo = !ENDS_CONVO.test(heard); if (convo) send(heard); else { stopSpeaking(); setState('idle'); resumeWake(); } }
+      else { convo = false; if (uiState === 'listening') setState('idle'); resumeWake(); }
     };
     try { rec.start(); mic.classList.add('live'); setState('listening'); chime(880, 1180); } catch {}
   }
@@ -1090,7 +1097,7 @@
       const m = text.match(/\b(jarvis|sophia)\b[\s,.!?]*(.*)$/i);          // either name wakes her/him up
       if (!m) return;
       stopRec();
-      const who = m[1].toLowerCase();
+      const who = m[1].toLowerCase(); convo = true;
       if (m[2] && m[2].length > 2) send(`${who}, ${m[2]}`);
       else if (who !== assistant) send(who);
       else { chime(880, 1180); startListening(); }
@@ -1106,7 +1113,7 @@
   document.addEventListener('keydown', e => {
     if (e.key === '/' && document.activeElement !== $('#input')) { e.preventDefault(); $('#input').focus(); }
     if (e.code === 'Space' && e.ctrlKey) { e.preventDefault(); mic.click(); }
-    if (e.key === 'Escape') { stopSpeaking(); stopRec(); setState('idle'); if (ctrlOn) send('stop control'); }
+    if (e.key === 'Escape') { convo = false; stopSpeaking(); stopRec(); setState('idle'); if (ctrlOn) send('stop control'); }
   });
 
   // ------------------------------------------------------------------ toggles

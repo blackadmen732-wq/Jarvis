@@ -30,6 +30,14 @@ Your own AI hub. Switch between **free models**, **paid models** and **your own 
 
 ---
 
+## Quick start: one command
+
+Already downloaded Jarvis? This updates it, installs what's missing (Node.js for Jarvis Hands), starts everything, adds the app icon and opens Jarvis connected to your computer:
+```bash
+cd ~/jarvis && git fetch origin && git checkout -B main origin/main && bash scripts/setup.sh
+```
+Then press **KEYS** in Jarvis and paste your keys. After that, just click the Jarvis icon.
+
 ## 1. Start the hub (10 minutes)
 
 You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
@@ -265,6 +273,7 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 
 **Talking to it:**
 - **Voice first:** the dock is just the mic. Tap it (or press Ctrl+Space), speak, and it sends when you stop. To type instead, press the ⌨ button or simply start typing anywhere; the box closes again when it's empty.
+- **Conversation mode:** once you talk by voice, the mic opens again by itself after each reply, like a phone call. No tapping. It ends when you stay quiet for a turn, say *"stop"*, *"that's all"* or *"goodbye"*, press Esc, or type.
 - Turn on **Wake word** and just say *"Jarvis, …"* or *"Sophia, …"* any time (the tab must stay open). It stays on next time you open the HUD.
 - **Voice** on/off controls whether Jarvis speaks replies out loud.
 - **Voices ▾** opens the **Voice Studio**:
@@ -361,7 +370,7 @@ Jarvis doesn't make you pick a model. The **Auto Router** looks at each request,
 
 **Cloud voices (optional):** with an OpenRouter key, the Voice Studio also offers **Jarvis** and **Sophia** voices from Fish Audio's free model, described in words in `hud/models.json` (`"tts"`). They sound natural and need nothing installed, which suits a Chromebook, but each spoken reply uses one of OpenRouter's daily free requests. Chrome's own voices stay free and unlimited, and they're the default.
 
-**Your ElevenLabs voices:** Jarvis and Sophia each have their own voice, designed in ElevenLabs (a calm British Jarvis, a sweet, bright Sophia). Press **KEYS**, paste your ElevenLabs API key (elevenlabs.io → Settings → API Keys), and save. Jarvis restarts itself, and both assistants switch to their ElevenLabs voices on their own. Each spoken reply uses ElevenLabs credits (about 1 credit per character). To go back to a free voice, pick one in the Voice Studio. The voice ids live in `hud/models.json` → `tts` → `elevenlabs`.
+**Your ElevenLabs voices:** Jarvis and Sophia each have their own voice, designed in ElevenLabs (a calm British Jarvis, a sweet, bright Sophia). There are two of each (Jarvis, Jarvis 2, Sophia, Sophia 2): the first is the default, pick the other in the Voice Studio. Press **KEYS**, paste your ElevenLabs API key (elevenlabs.io → Settings → API Keys), and save. Jarvis restarts itself, and both assistants switch to their ElevenLabs voices on their own. Each spoken reply uses ElevenLabs credits (about 1 credit per character). To go back to a free voice, pick one in the Voice Studio. The voice ids live in `hud/models.json` → `tts` → `elevenlabs`.
 
 ### Sophia and Jarvis: two assistants
 
