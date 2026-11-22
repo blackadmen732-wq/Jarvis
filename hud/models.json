@@ -427,6 +427,7 @@
     "elevenlabs": {
       "_help": "Mark's own voices designed in ElevenLabs. Used when ELEVENLABS_API_KEY is set (Keys form). Costs ElevenLabs credits.",
       "model": "eleven_flash_v2_5",
+      "max_chars": 400,
       "jarvis": "m1MlcO1UYd9r9EGhaLhm",
       "jarvis2": "nOkaUW6ELQn1VlqB3GzQ",
       "sophia": "RGMwP7SMkEVbP3SM5gdy",

@@ -813,6 +813,13 @@ const cloudList = () => [...(OPENROUTER_KEY ? CLOUD_VOICES : []), ...elevenVoice
 async function elevenSpeech(voice, text, speed, res) {
   const el = (config.tts && config.tts.elevenlabs) || {}, id = el[voice.replace(/^el_/, '')];
   if (!ELEVEN_KEY || !id) return json(res, 503, { error: 'ElevenLabs voices need ELEVENLABS_API_KEY (Keys form) and the voice ids in models.json' });
+  // Saving credits (Mark, Nov 22): every line is made once and kept on disk; saying it again is free.
+  // Replies longer than tts.elevenlabs.max_chars (default 400) are refused, so the HUD reads those with a free voice.
+  const key = require('crypto').createHash('sha256').update([id, el.model || '', speed.toFixed(2), text].join('|')).digest('hex');
+  const dir = path.join(DATA_DIR, 'tts-cache'), file = path.join(dir, key + '.mp3');
+  try { const hit = fs.readFileSync(file); fs.utimesSync(file, new Date(), new Date());
+    res.writeHead(200, { 'content-type': 'audio/mpeg', 'cache-control': 'no-store', 'content-length': hit.length }); return res.end(hit); } catch {}
+  if (text.length > (Number(el.max_chars) || 400)) return json(res, 413, { error: 'long reply: read with a free voice to save ElevenLabs credits' });
   const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(id)}?output_format=mp3_44100_128`, {
     method: 'POST', signal: AbortSignal.timeout(60e3),
     headers: { 'content-type': 'application/json', 'xi-api-key': ELEVEN_KEY, accept: 'audio/mpeg' },
@@ -821,6 +828,12 @@ async function elevenSpeech(voice, text, speed, res) {
   });
   if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); m = (j.detail && (j.detail.message || j.detail)) || m; } catch {} throw new Error(String(m)); }
   const buf = Buffer.from(await r.arrayBuffer());
+  try {
+    fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, buf);
+    const all = fs.readdirSync(dir).map(f => { const p = path.join(dir, f); return { p, t: fs.statSync(p).mtimeMs, n: fs.statSync(p).size }; });
+    let total = all.reduce((a, x) => a + x.n, 0);
+    for (const x of all.sort((a, b) => a.t - b.t)) { if (total < 200e6) break; fs.unlinkSync(x.p); total -= x.n; }   // keep at most ~200 MB
+  } catch {}
   res.writeHead(200, { 'content-type': 'audio/mpeg', 'cache-control': 'no-store', 'content-length': buf.length }); res.end(buf);
 }
 async function cloudSpeech(voice, text, speed, res) {
