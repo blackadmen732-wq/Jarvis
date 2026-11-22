@@ -1,0 +1,6 @@
+{
+  "llm_provider": "openai_compatible",
+  "llm_base_url": "http://localhost:3000/api",
+  "llm_api_key": "PASTE_YOUR_JARVIS_OS_API_KEY_HERE",
+  "llm_chat_model": "jarvis"
+}

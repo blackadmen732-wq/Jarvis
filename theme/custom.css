@@ -1,0 +1,85 @@
+/* ==========================================================
+   Jarvis OS theme for Open WebUI
+   Deep navy + cyan "HUD" look. Works in Light and Dark mode;
+   designed for Dark (Settings -> General -> Theme -> Dark).
+   To turn it off: remove the theme line in docker-compose.yml.
+   ========================================================== */
+
+:root {
+  /* Accent colour: change these two lines to re-colour everything */
+  --jarvis-accent: oklch(80% 0.13 215);       /* cyan */
+  --jarvis-accent-soft: oklch(80% 0.13 215 / 0.18);
+
+  /* Blue-tinted greys replace Open WebUI's neutral greys */
+  --color-gray-50:  oklch(98% 0.005 250);
+  --color-gray-100: oklch(95% 0.01 250);
+  --color-gray-200: oklch(91% 0.015 250);
+  --color-gray-300: oklch(84% 0.02 250);
+  --color-gray-400: oklch(74% 0.025 250);
+  --color-gray-500: oklch(64% 0.03 250);
+  --color-gray-600: oklch(50% 0.035 250);
+  --color-gray-700: oklch(38% 0.04 255);
+  --color-gray-800: oklch(28% 0.04 258);
+  --color-gray-850: oklch(23% 0.04 260);
+  --color-gray-900: oklch(18% 0.035 262);
+  --color-gray-950: oklch(14% 0.03 265);
+}
+
+/* Soft glow behind the page in dark mode */
+html.dark body {
+  background:
+    radial-gradient(1200px 600px at 50% -10%, oklch(40% 0.09 230 / 0.35), transparent 70%),
+    var(--color-gray-950);
+}
+html.dark #app,
+html.dark .app,
+html.dark main { background: transparent; }
+
+/* Message box: glass panel with a cyan edge when typing */
+html.dark #message-input-container {
+  background: oklch(20% 0.04 260 / 0.65);
+  backdrop-filter: blur(12px);
+  border: 1px solid oklch(80% 0.13 215 / 0.22) !important;
+  box-shadow: 0 10px 40px oklch(10% 0.03 260 / 0.6);
+  transition: border-color .2s, box-shadow .2s;
+}
+html.dark #message-input-container:focus-within {
+  border-color: var(--jarvis-accent);
+  box-shadow: 0 0 0 3px var(--jarvis-accent-soft), 0 10px 40px oklch(10% 0.03 260 / 0.6);
+}
+
+/* Send / voice button in accent colour */
+html.dark #send-message-button:not(:disabled),
+html.dark #voice-input-button + button,
+html.dark button[aria-label="Voice mode"],
+html.dark button[aria-label="Call"] {
+  background: var(--jarvis-accent) !important;
+  color: oklch(18% 0.035 262) !important;
+  box-shadow: 0 0 18px oklch(80% 0.13 215 / 0.45);
+}
+
+/* Selected / focused items get the accent ring */
+html.dark .ring-blue-500,
+html.dark .focus\:ring-blue-500:focus,
+html.dark [class*="ring-blue"] {
+  --tw-ring-color: var(--jarvis-accent) !important;
+  border-color: var(--jarvis-accent) !important;
+}
+html .focus-ring,
+html [data-arrow-selected="true"] {
+  outline-color: var(--jarvis-accent) !important;
+  --tw-ring-color: var(--jarvis-accent) !important;
+}
+
+/* Links and highlights */
+html.dark .prose a,
+html.dark a.text-blue-500,
+html.dark .text-blue-500,
+html.dark .text-blue-400 { color: var(--jarvis-accent) !important; }
+
+/* Text selection */
+::selection { background: var(--jarvis-accent-soft); }
+
+/* Thin cyan scrollbars */
+html.dark ::-webkit-scrollbar-thumb { background: oklch(80% 0.13 215 / 0.25); border-radius: 8px; }
+html.dark * { scrollbar-color: oklch(80% 0.13 215 / 0.25) transparent; }

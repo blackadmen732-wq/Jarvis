@@ -1,0 +1,7 @@
+.env
+models/*
+!models/.gitkeep
+jarvis/config.json
+
+# Jarvis HUD local state
+hud/data/

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Jarvis OS</title>
+  <meta name="theme-color" content="#030508">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="hud.css">
+</head>
+<body data-state="idle">
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <div id="scene3d" aria-hidden="true"></div>
+  <div class="gl-hint">Drag to rotate · Scroll to zoom · Click a node to route</div>
+
+  <header class="top">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <div class="brand-name">J.A.R.V.I.S</div>
+        <div class="brand-sub">Jarvis OS · Neural Router</div>
+      </div>
+    </div>
+    <div class="chips" id="chips">
+      <span class="chip" id="chip-router"><i></i>Router</span>
+      <span class="chip" id="chip-local"><i></i>Local</span>
+      <span class="chip" id="chip-links"><i></i>Links</span>
+      <span class="chip chip-mode" id="chip-mode">Single</span>
+    </div>
+    <div class="clock"><span id="clock-time">--:--</span><span id="clock-date"></span></div>
+  </header>
+
+  <aside class="panel panel-left" id="panel-links" aria-label="Model links">
+    <div class="panel-head"><span>Neural Links</span><span class="panel-meta" id="links-meta"></span></div>
+    <div class="panel-hint">Tap to route · ◆ = council seat</div>
+    <div class="links" id="links"></div>
+    <div class="panel-head small"><span>Signal</span><span class="panel-meta" id="signal-meta">0%</span></div>
+    <canvas id="signal" height="48"></canvas>
+  </aside>
+
+  <aside class="panel panel-right" id="panel-log" aria-label="Conversation">
+    <div class="panel-head"><span>Comms Log</span><button class="ghost" id="clear-log" type="button">Clear</button></div>
+    <div class="log" id="log" aria-live="polite">
+      <div class="msg sys"><div class="who">Jarvis</div><div class="text">Systems online. Say "Jarvis" or tap the mic. Try: "switch to Groq", "start the council", or "status".</div></div>
+    </div>
+  </aside>
+
+  <div class="status-line" id="status-line">
+    <div class="state-label" id="state-label">Standby</div>
+    <div class="active-model" id="active-model">—</div>
+  </div>
+
+  <footer class="dock">
+    <div class="dock-toggles">
+      <button class="toggle" id="t-council" type="button" aria-pressed="false" title="Council: several AIs discuss, Jarvis gives the verdict">Council</button>
+      <button class="toggle" id="t-wake" type="button" aria-pressed="false" title="Always listen for the word Jarvis">Wake word</button>
+      <button class="toggle on" id="t-voice" type="button" aria-pressed="true" title="Jarvis speaks replies out loud">Voice</button>
+      <button class="toggle" id="t-voices" type="button" aria-expanded="false" title="Choose Jarvis's voice">Voices ▾</button>
+      <button class="toggle on" id="t-fx" type="button" aria-pressed="true" title="Interface sounds">FX</button>
+      <button class="toggle" id="t-scene" type="button" title="Change the core / scene (Black Hole, Sun, Reactor, Neural Brain, Data Stream)">◐ Auto</button>
+      <button class="toggle on" id="t-color" type="button" title="Change the colour theme">● Amber</button>
+      <button class="toggle on" id="t-holo" type="button" aria-pressed="true" title="Holographic machine rings, drones and radar">Holo</button>
+    </div>
+    <form class="dock-input" id="form" autocomplete="off">
+      <button class="mic" id="mic" type="button" aria-label="Talk to Jarvis"><span></span></button>
+      <input id="input" type="text" placeholder="Speak or type a command…" aria-label="Message">
+      <button class="send" type="submit" aria-label="Send">➤</button>
+    </form>
+  </footer>
+
+  <div class="voice-panel panel-pop" id="voice-panel" hidden>
+    <div class="panel-head"><span>Voice Studio</span><button class="ghost" id="voice-close" type="button">Close</button></div>
+    <div class="vp-filters" role="group" aria-label="Filter voices">
+      <button type="button" class="toggle on" data-filter="all">All</button>
+      <button type="button" class="toggle" data-filter="female">Female</button>
+      <button type="button" class="toggle" data-filter="male">Male</button>
+      <button type="button" class="toggle" data-filter="natural">Natural</button>
+    </div>
+    <div class="vp-list" id="vp-list"></div>
+    <label class="vp-slider">Speed <input type="range" id="vp-rate" min="0.7" max="1.4" step="0.01"><output id="vp-rate-out"></output></label>
+    <label class="vp-slider">Pitch <input type="range" id="vp-pitch" min="0.6" max="1.4" step="0.01"><output id="vp-pitch-out"></output></label>
+    <div class="vp-actions"><button type="button" class="toggle on" id="vp-test">Test voice</button><span class="vp-note" id="vp-note"></span></div>
+  </div>
+
+  <nav class="mobile-tabs">
+    <button type="button" data-open="panel-links">Links</button>
+    <button type="button" data-open="panel-log">Log</button>
+  </nav>
+
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/", "postprocessing": "./vendor/postprocessing.js" } }
+  </script>
+  <script src="hud.js"></script>
+  <script type="module" src="scene3d.js"></script>
+</body>
+</html>

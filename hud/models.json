@@ -1,0 +1,171 @@
+{
+  "_help": "Your favourite models. 'model' is provider/model as the router knows it. 'aliases' are words you can say: 'Jarvis, switch to <alias>'. 'group' picks the colour family on the HUD. Local Ollama models you download are added automatically.",
+  "active": "groq",
+  "fallback": "qwen7b",
+  "council": [
+    "nemotron",
+    "groq",
+    "cerebras"
+  ],
+  "models": [
+    {
+      "id": "groq",
+      "label": "GPT-OSS 120B",
+      "group": "Groq",
+      "model": "groq/openai/gpt-oss-120b",
+      "aliases": [
+        "groq",
+        "fast",
+        "gpt",
+        "gpt oss",
+        "default"
+      ]
+    },
+    {
+      "id": "cerebras",
+      "label": "Qwen 3.8",
+      "group": "Cerebras",
+      "model": "cerebras/qwen-3.8-27b",
+      "aliases": [
+        "cerebras",
+        "qwen"
+      ]
+    },
+    {
+      "id": "kimi",
+      "label": "Kimi K3.1 Pro",
+      "group": "NVIDIA",
+      "model": "nvidia_nim/moonshotai/kimi-k3.1-pro",
+      "aliases": [
+        "kimi",
+        "moonshot",
+        "deep",
+        "thinker"
+      ],
+      "note": "smart but slow (up to a minute)"
+    },
+    {
+      "id": "nemotron",
+      "label": "Nemotron Ultra",
+      "group": "NVIDIA",
+      "model": "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b",
+      "aliases": [
+        "nemotron",
+        "nvidia",
+        "ultra"
+      ]
+    },
+    {
+      "id": "lightning",
+      "label": "Nemotron Lightning",
+      "group": "NVIDIA",
+      "model": "nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "aliases": [
+        "lightning",
+        "quick",
+        "nemotron lightning"
+      ]
+    },
+    {
+      "id": "free",
+      "label": "Free Auto",
+      "group": "OpenRouter",
+      "model": "open_router/openrouter/free",
+      "aliases": [
+        "free",
+        "free model",
+        "open router",
+        "openrouter"
+      ]
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini Flash",
+      "group": "Google",
+      "model": "gemini/models/gemini-3.8-flash",
+      "aliases": [
+        "gemini",
+        "google"
+      ]
+    },
+    {
+      "id": "claude",
+      "label": "Claude Sonnet",
+      "group": "Anthropic",
+      "model": "open_router/anthropic/claude-sonnet-5.5",
+      "aliases": [
+        "claude",
+        "sonnet",
+        "anthropic"
+      ],
+      "paid": true
+    },
+    {
+      "id": "qwen7b",
+      "label": "Qwen 7B Uncensored",
+      "group": "Local",
+      "model": "ollama/huihui_ai/qwen2.5-abliterate:7b",
+      "aliases": [
+        "qwen 7b",
+        "qwen seven",
+        "seven b",
+        "uncensored 7b"
+      ],
+      "note": "all-round uncensored, good at following instructions and using tools"
+    },
+    {
+      "id": "uncensored",
+      "label": "Uncensored 9B",
+      "group": "Local",
+      "model": "ollama/huihui_ai/qwen3.5-abliterated:9b",
+      "aliases": [
+        "uncensored",
+        "abliterated",
+        "local",
+        "offline",
+        "private",
+        "nine b"
+      ],
+      "note": "smartest everyday uncensored model in the set"
+    },
+    {
+      "id": "coder",
+      "label": "Coder 7B Uncensored",
+      "group": "Local",
+      "model": "ollama/huihui_ai/qwen2.5-coder-abliterate:7b",
+      "aliases": [
+        "coder",
+        "coding",
+        "code",
+        "programmer"
+      ],
+      "note": "writing and fixing code"
+    },
+    {
+      "id": "vision",
+      "label": "Vision 8B Uncensored",
+      "group": "Local",
+      "model": "ollama/huihui_ai/qwen3-vl-abliterated:8b",
+      "aliases": [
+        "vision",
+        "eyes",
+        "see",
+        "screen"
+      ],
+      "note": "can look at images and your screen (used for laptop control)"
+    },
+    {
+      "id": "fast",
+      "label": "Fast 2B Uncensored",
+      "group": "Local",
+      "model": "ollama/huihui_ai/qwen3.5-abliterated:2b",
+      "aliases": [
+        "fast local",
+        "quick local",
+        "tiny",
+        "small"
+      ],
+      "note": "instant replies, lower quality"
+    }
+  ]
+}

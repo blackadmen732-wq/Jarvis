@@ -1,0 +1,106 @@
+# Jarvis OS: one hub for every AI model + your own models.
+#   open-webui = the hub (chat screen, model dropdown, agents, voice, file uploads)
+#   ollama     = runs your own / downloaded models on this machine
+#   router     = lets Claude Code & other coding agents use those models
+#   hud        = Jarvis holographic voice interface (http://localhost:3001)
+#   voice      = natural studio voices for Jarvis (Kokoro)
+#
+# Start:  docker compose up -d      then open http://localhost:3000
+# Stop:   docker compose down       (your chats and models are kept)
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: jarvis-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+      - ./models:/models            # drop your own .gguf model files here
+    # --- NVIDIA GPU? Remove the # from the 6 lines below. ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: jarvis-hub
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    ports:
+      - "3000:8080"
+    environment:
+      WEBUI_NAME: ${WEBUI_NAME:-Jarvis OS}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?Set WEBUI_SECRET_KEY in .env}
+      # Your own models (Ollama)
+      OLLAMA_BASE_URL: http://ollama:11434
+      # Cloud models. Order matters: URL 1 uses KEY 1, URL 2 uses KEY 2, ...
+      #   1. OpenRouter  -> free models + Claude, GPT, DeepSeek, etc.
+      #   2. Google Gemini
+      #   3. Zhipu GLM (z.ai)
+      # These are read on FIRST start only. After that, change them in
+      # Admin Panel -> Settings -> Connections.
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URLS: "https://openrouter.ai/api/v1;https://generativelanguage.googleapis.com/v1beta/openai;https://api.z.ai/api/paas/v4"
+      OPENAI_API_KEYS: "${OPENROUTER_API_KEY:-};${GEMINI_API_KEY:-};${ZAI_API_KEY:-}"
+      # Lets Jarvis (the desktop voice assistant) log in with an API key
+      ENABLE_API_KEYS: "true"
+    volumes:
+      - open-webui:/app/backend/data
+      # Jarvis look (colours, glow). Delete this line to go back to the default look.
+      - ./theme/custom.css:/app/build/static/custom.css:ro
+
+  # Router: lets coding agents (Claude Code, Codex, Cline, Aider...) use free,
+  # local and uncensored models. Claude Code connects to http://localhost:8082
+  router:
+    build: ./router
+    container_name: jarvis-router
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    ports:
+      - "127.0.0.1:8082:8082"      # only reachable from this computer
+    env_file: .env                 # model choices + provider keys (see .env.example)
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+    volumes:
+      - router:/root/.fcc          # keeps settings made in the router's Admin page
+
+  # Jarvis HUD: the holographic voice interface. Open http://localhost:3001
+  hud:
+    build: ./hud
+    container_name: jarvis-hud
+    restart: unless-stopped
+    depends_on:
+      - router
+      - ollama
+      - voice
+    ports:
+      - "127.0.0.1:3001:3001"      # only reachable from this computer
+    environment:
+      ROUTER_URL: http://router:8082
+      OLLAMA_URL: http://ollama:11434
+      KOKORO_URL: http://voice:8880
+    volumes:
+      - ./hud/models.json:/app/models.json:ro          # edit favourites, then restart hud
+      - ./jarvis/jarvis-persona.md:/app/persona.md:ro  # Jarvis's personality
+      - hud:/data                                      # remembers active model + council
+
+  # Studio voices: 50+ natural voices (Kokoro-82M), free, runs on this computer.
+  # Has an NVIDIA GPU? Use image ghcr.io/remsky/kokoro-fastapi-gpu:v0.10.0 instead.
+  voice:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.10.0
+    container_name: jarvis-voice
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8880:8880"      # voice playground at http://localhost:8880/web
+
+volumes:
+  ollama:
+  open-webui:
+  router:
+  hud:
