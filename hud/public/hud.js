@@ -439,20 +439,63 @@
   }
   $('#clear-log').addEventListener('click', () => { log.innerHTML = ''; history.length = 0; });
 
+  // ------------------------------------------------------------------ Jarvis Hands (your computer, ../../hands/hands.js)
+  // This page (in YOUR browser, on your computer) is what talks to Jarvis Hands, never the server in Docker.
+  // Pair once: start `node hands/hands.js`, then type "hands code <code>". Every step waits for "confirm".
+  const HANDS = 'http://localhost:3002';
+  let handsToken = store.get('handsToken', ''), handsInfo = null, queuedStep = null;
+  async function handsFetch(p, body) {
+    const r = await fetch(HANDS + p, body ? { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': handsToken }, body: JSON.stringify(body) }
+                                          : { headers: { 'x-jarvis-token': handsToken } });
+    const j = await r.json().catch(() => ({ error: 'HTTP ' + r.status }));
+    if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+    return j;
+  }
+  async function handsConnect(quiet) {
+    if (!handsToken) { handsInfo = null; return false; }
+    try {
+      handsInfo = await handsFetch('/info');
+      if (!quiet) { addMsg('sys', 'Jarvis', `Hands connected to ${handsInfo.os}. Work folder: ${handsInfo.cwd}. I'll show you every step and wait for "confirm".`); chime(660, 990); }
+      return true;
+    } catch (e) {
+      handsInfo = null;
+      if (!quiet) addMsg('err', 'Hands', `Couldn't reach Jarvis Hands (${e.message}). Is "node hands/hands.js" running on this computer?`);
+      return false;
+    }
+  }
+  handsConnect(true);
+  async function handsRun(step) {
+    try {
+      if (step.action === 'open') { await handsFetch('/open', { url: step.url }); addMsg('sys', 'Jarvis', `Opened ${step.url}`); return null; }
+      const r = await handsFetch('/run', { command: step.command });
+      const out = [r.stdout, r.stderr].filter(Boolean).join('\n').trim();
+      const el = addMsg('sys hands-out', `Hands · ${r.code === 0 ? 'done' : 'exit ' + r.code}`, `$ ${r.command}\n${out || '(no output)'}`, (r.ms / 1000).toFixed(1) + 's');
+      el.classList.toggle('err', r.code !== 0);
+      return r;
+    } catch (e) { addMsg('err', 'Hands', e.message); return null; }
+  }
+
   // ------------------------------------------------------------------ chat
   let busy = false;
-  async function send(text) {
+  async function send(text, extra = null) {
     text = String(text || '').trim();
     if (!text || busy) return;
+    const pair = text.match(/^(?:jarvis[,\s]+)?hands (?:code|pair)\s+([a-f0-9]{12})$/i);
+    if (pair || /^(?:jarvis[,\s]+)?hands (?:disconnect|unpair|forget)$/i.test(text)) {
+      $('#input').value = ''; addMsg('user', 'You', pair ? 'hands code ••••' : text);
+      handsToken = pair ? pair[1].toLowerCase() : ''; store.set('handsToken', handsToken);
+      if (pair) await handsConnect(false); else { handsInfo = null; addMsg('sys', 'Jarvis', 'Hands disconnected. I can no longer touch your computer.'); }
+      return;
+    }
     busy = true;
     stopSpeaking();
     $('#input').value = '';
-    addMsg('user', 'You', text);
+    if (!extra) addMsg('user', 'You', text);
     setState('thinking'); flowDir = 1; speakingId = S.active;
     let bubble = null, bubbleText = '', prevSpeaker = null, finalText = '', pending = null, role = '';
     const flushSpeech = () => { if (pending) { speakText(pending); pending = null; } };
     try {
-      const res = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, history: history.slice(-12) }) });
+      const res = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text, history: history.slice(-12), hands: handsInfo, ...(extra || {}) }) });
       const reader = res.body.getReader(), dec = new TextDecoder();
       let buf = '';
       for (;;) {
@@ -504,6 +547,9 @@
             if (d.action === 'theme') setTheme(d.theme, true);
             if (d.action === 'council') { S.councilMode = d.on; render(); chime(d.on ? 520 : 880, d.on ? 780 : 520); }
             if (d.action === 'lina') { if (d.status === 'invalid') chime(300, 220); else chime(660, d.status === 'saved' ? 990 : 880); }
+            if (d.action === 'hands_proposal') { addMsg('sys hands-out', 'Proposed step · waiting for "confirm"', d.step.action === 'open' ? `open ${d.step.url}` : `$ ${d.step.command}`); chime(520, 660); }
+            if (d.action === 'hands_refused') { addMsg('err', 'Hands · locked', `$ ${d.command}\nRefused: ${d.reason}`); chime(300, 220); }
+            if (d.action === 'hands_run') queuedStep = d.step;
           } else if (d.type === 'council') {
             d.members.forEach((id, k) => setTimeout(() => beams.push({ from: S.active, to: id, life: 1.6 }), k * 150));
           } else if (d.type === 'done') {
@@ -514,11 +560,16 @@
     } catch (e) {
       addMsg('err', 'System', 'Lost connection to the HUD server. Is it running?');
     }
-    if (finalText) { history.push({ role: 'user', content: text }, { role: 'assistant', content: finalText }); }
+    if (finalText && !extra) { history.push({ role: 'user', content: text }, { role: 'assistant', content: finalText }); }
     busy = false;
     speakingId = null;
     if (!speaking) setState(wakeOn ? 'idle' : 'idle');
     refreshState();
+    if (queuedStep) {                                   // you said "confirm": run it on your computer, then explain
+      const step = queuedStep; queuedStep = null;
+      const r = await handsRun(step);
+      if (r) send('result', { hands_result: r });
+    }
   }
   $('#form').addEventListener('submit', e => { e.preventDefault(); send($('#input').value); });
 

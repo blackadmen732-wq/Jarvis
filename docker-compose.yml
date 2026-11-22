@@ -74,7 +74,9 @@ services:
 
   # Jarvis HUD: the holographic voice interface. Open http://localhost:3001
   hud:
-    build: ./hud
+    build:
+      context: .
+      dockerfile: hud/Dockerfile
     container_name: jarvis-hud
     restart: unless-stopped
     depends_on:

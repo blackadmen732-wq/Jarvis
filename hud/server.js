@@ -41,7 +41,8 @@ const state = {
   council: saved.council || config.council || [],
   extra: saved.extra || [],           // models added by voice ("switch to llama")
 };
-let pendingRule = null;               // a checked Lina rule waiting for "confirm" 
+let pendingRule = null;               // a checked Lina rule waiting for "confirm"
+let pendingHands = null;              // a computer action (Jarvis Hands) waiting for "confirm" 
 function saveState() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -168,6 +169,10 @@ function parseCommand(text) {
   if (/^(stop|end|disable|close|turn off|exit)( the)? council|council (mode )?(off|stop)/.test(t)) return { action: 'council', on: false };
   if (/^(status|system status|report|diagnostics)$|^(which|what) model( are you| is active| are we)/.test(t)) return { action: 'status' };
   if (/^(list|show|what are)( the| my| your)? models|^what models/.test(t)) return { action: 'list' };
+  // Jarvis Hands (your computer): "computer, ...", "on my computer ...", "terminal ...", "run ...", "open <site>"
+  if ((m = raw.match(/^(?:(?:on |use )?(?:my |the )?(?:computer|laptop|terminal|pc|mac|chromebook)|run|execute)\s*[:,-]?\s+(.+)$/i)) && m[1].trim()) return { action: 'hands', text: m[1].trim() };
+  if ((m = raw.match(/^(?:open|browse to|launch|pull up)\s+(?:the |a )?(?:website |site |page |url )?(\S.*)$/i))) return { action: 'hands', text: 'open ' + m[1].trim() };
+  if (/^(hands|computer control) (off|status)$/.test(t)) return { action: 'hands_status' };
   return null;
 }
 
@@ -294,13 +299,19 @@ async function handleChat(body, send) {
     return say(`Running on ${a ? a.label : 'nothing'}. Router ${routerOnline ? 'online' : 'offline'}, local engine ${localOnline ? 'online with ' + localModels.length + ' models' : 'offline'}. ${okCount} links confirmed working. Council mode is ${state.councilMode ? 'on' : 'off'}.`);
   }
   if (cmd && cmd.action === 'lina') return linaRule(cmd.text, send, say);
+  if (cmd && cmd.action === 'lina_confirm' && pendingHands) {         // "confirm" runs the waiting computer action
+    const a = pendingHands; pendingHands = null;
+    send({ type: 'command', action: 'hands_run', step: a });
+    return say(a.action === 'open' ? `Opening ${a.url}.` : 'Running it now.');
+  }
   if (cmd && cmd.action === 'lina_confirm') {
-    if (!pendingRule) return say('There is no Lina rule waiting. Say "Lina rule" and then what you want.');
+    if (!pendingRule) return say('There is nothing waiting to confirm.');
     const n = saveRule(pendingRule); const r = pendingRule; pendingRule = null;
     send({ type: 'command', action: 'lina', status: 'saved', rule: r.text });
     return say(`Saved. You now have ${n} Lina rule${n === 1 ? '' : 's'}. ${r.english}`);
   }
   if (cmd && cmd.action === 'lina_cancel') {
+    if (pendingHands) { pendingHands = null; return say('Cancelled. Nothing was run.'); }
     if (!pendingRule) return say('Nothing to cancel.');
     pendingRule = null; return say('Discarded. Nothing was saved.');
   }
@@ -310,9 +321,13 @@ async function handleChat(body, send) {
     return say(rules.slice(-5).map((r, i) => `Rule ${rules.length - Math.min(5, rules.length) + i + 1}: ${r.english}`).join(' '));
   }
   if (cmd && cmd.action === 'edgebot') return say(await edgebotReport());
+  if (cmd && cmd.action === 'hands') return handsPlan(cmd.text, body.hands, send, say);
+  if (cmd && cmd.action === 'hands_status') return say(body.hands ? `Hands connected on ${body.hands.os}. Work folder: ${body.hands.cwd}. Say "hands disconnect" in the HUD to unpair.` : 'Hands are not connected. Run node hands/hands.js on your computer, then type: hands code, and the code it shows.');
   if (cmd && cmd.action === 'list') {
     return say('Available: ' + allModels().filter(m => m.installed).map(m => m.label).join(', ') + '.');
   }
+
+  if (body.hands_result) return handsSummary(body.hands_result, send);
 
   const history = cleanHistory(body.history);
   const active = byId(state.active) || allModels()[0];
@@ -400,6 +415,62 @@ function saveRule(r) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.appendFileSync(RULES_PATH, `# saved ${new Date().toISOString()} (fingerprint ${String(r.fingerprint).slice(0, 16)})\n# means: ${r.english}\n${r.text}\n`);
   return readRules().length;
+}
+
+// ---------------------------------------------------------------- Jarvis Hands (../hands/hands.js on your computer)
+// The model only PROPOSES one step as JSON. You see the exact command and say "confirm"; then your browser (not this
+// server, which lives in Docker) sends it to Jarvis Hands, which refuses locked commands and logs everything.
+let handsLocked = null;
+for (const f of ['./hands.js', '../hands/hands.js']) {       // the same locked list Jarvis Hands enforces (Docker / local)
+  try { handsLocked = require(f).lockedReason; break; } catch {}
+}
+if (!handsLocked) handsLocked = () => null;               // Jarvis Hands still refuses locked commands on its side
+const HANDS_RULES = (h) => `You operate Mark's computer for him through Jarvis Hands. Computer: ${h.os}. Shell: ${h.shell}. ` +
+  `Commands start in the folder ${h.cwd}. Turn the request into exactly ONE step and reply with JSON only, no other text:\n` +
+  `{"action":"run","command":"<one shell command>","why":"<what it does, under 15 words>"}\n` +
+  `{"action":"open","url":"https://...","why":"..."}  (to open a website in his browser)\n` +
+  `{"action":"none","why":"<why it can't or shouldn't be done>"}\n` +
+  `Prefer safe, read-only commands. Never use sudo or admin rights, never delete or overwrite files he didn't name, ` +
+  `never pipe downloads into a shell. For several steps, give only the first one.`;
+
+function parsePlan(text) {
+  const m = String(text || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { const j = JSON.parse(m[0]); return j && typeof j === 'object' ? j : null; } catch { return null; }
+}
+
+async function handsPlan(request, hands, send, say) {
+  if (!hands || !hands.cwd) return say('Hands are not connected. Run node hands/hands.js on your computer, then type: hands code, and the code it shows.');
+  const writer = byId(state.active) || allModels()[0];
+  let text = '';
+  try {
+    for await (const piece of streamModel(writer, HANDS_RULES(hands), [{ role: 'user', content: request }], 300)) text += piece;
+  } catch (e) { return say(`I couldn't plan that: ${cleanError(e.message)}.`); }
+  const p = parsePlan(text);
+  if (!p || !['run', 'open', 'none'].includes(p.action)) return say("I couldn't turn that into a safe step. Try saying it more simply.");
+  if (p.action === 'none') return say(`I won't do that: ${String(p.why || 'not possible').slice(0, 200)}`);
+  const why = String(p.why || '').slice(0, 200).trim().replace(/([^.!?])$/, '$1.');
+  if (p.action === 'open') {
+    let url; try { url = new URL(String(p.url)); } catch { return say("That isn't a web address I can open."); }
+    if (!/^https?:$/.test(url.protocol)) return say('I only open http and https pages.');
+    pendingRule = null; pendingHands = { action: 'open', url: url.href, why };
+    send({ type: 'command', action: 'hands_proposal', step: pendingHands });
+    return say(`I'd like to open ${url.hostname} in your browser. Say confirm, or cancel.`);
+  }
+  const command = String(p.command || '').trim().slice(0, 2000);
+  if (!command) return say("I couldn't work out the command.");
+  const locked = handsLocked(command);
+  if (locked) { send({ type: 'command', action: 'hands_refused', command, reason: locked }); return say(`That command is locked: ${locked}. I won't run it.`); }
+  pendingRule = null; pendingHands = { action: 'run', command, why };
+  send({ type: 'command', action: 'hands_proposal', step: pendingHands });
+  return say(`I'd like to run this on your computer: ${command}. ${why} Say confirm to run it, or cancel.`);
+}
+
+async function handsSummary(r, send) {
+  const active = byId(state.active) || allModels()[0];
+  const out = String(r.stdout || '').slice(0, 3000), err = String(r.stderr || '').slice(0, 1000);
+  const system = `${persona()}\n\nYou just ran a command on Mark's computer through Jarvis Hands. Tell him what the result means in at most two short sentences. ${VOICE_RULES}`;
+  await speak(send, active, system, [{ role: 'user', content: `Command: ${String(r.command || '').slice(0, 500)}\nExit code: ${r.code}\nOutput:\n${out || '(none)'}${err ? '\nErrors:\n' + err : ''}` }], 'answer', { fallback: byId(config.fallback), maxTokens: 200 });
 }
 
 // ---------------------------------------------------------------- Edge Bot by voice (read-only)
