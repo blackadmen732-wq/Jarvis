@@ -262,6 +262,9 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
   - **View**: *Wide* (see everything), *Close* (fly in near the disk), *Follow* (ride along with the last thing you threw). Drag to turn and scroll to zoom at any time.
   - **Plasma** slider: from a thin disk to a dense, blazing one.
   - while Play is open, the black hole stays on screen even when Jarvis talks.
+
+![Play: light rays bending round the hole, a gas cloud falling in](docs/hud-play-light.jpg)
+![Close view, Plasma turned up, a gas cloud stretched into a stream](docs/hud-play-dense.jpg)
 - **Gravity:** every model orbits the core on its own path (faint orbit lines); closer ones move faster, like real planets. The linked model's orbit glows.
 - **Control-room readouts** around the core show live data: core form and state, the linked model and provider, latency, how many links work, uptime, and Signal / Links gauges.
 - **Holo** shows/hides the holographic layer: gear-toothed machine rings turning around the core, wireframe drones orbiting (grab one and throw it into the black hole), and a radar sweep on the floor (when the floor shows). Say *"hide the holograms"* / *"show the holograms"*.
