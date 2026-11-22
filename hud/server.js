@@ -135,6 +135,20 @@ function allModels() {
 }
 const byId = id => allModels().find(m => m.id === id);
 
+// Who takes over when a model fails: your local model if it's downloaded, otherwise the first free cloud model that
+// hasn't just failed (a Chromebook usually has no local model, and a fallback that isn't there is no fallback).
+const CLOUD_FALLBACKS = ['groq', 'cerebras', 'lightning', 'free', 'gemini'];
+function bestFallback(activeId) {
+  const recentFail = m => m.status && m.status.state === 'error' && Date.now() - (m.status.at || 0) < 5 * 60e3;
+  const local = byId(config.fallback);
+  if (local && local.id !== activeId && (!local.local || local.installed) && !recentFail(local)) return local;
+  for (const id of config.fallbacks || CLOUD_FALLBACKS) {
+    const m = byId(id);
+    if (m && m.id !== activeId && !m.paid && m.installed && !recentFail(m)) return m;
+  }
+  return null;
+}
+
 async function refreshHealth() {
   try {
     const r = await fetch(OLLAMA + '/api/tags', { signal: AbortSignal.timeout(3000) });
@@ -466,7 +480,7 @@ async function handleChat(body, send) {
 
   const history = cleanHistory(body.history);
   const active = byId(state.active) || allModels()[0];
-  const fallback = byId(config.fallback);
+  const fallback = bestFallback(active.id);
 
   if (!state.councilMode) {
     const system = `${persona()}\n\n${VOICE_RULES}\nYou are currently running on the ${active.label} model (${active.group}).`;
@@ -517,7 +531,7 @@ async function linaRule(request, send, say) {
       let messages = [...shots, { role: 'user', content: request }];
       while (tries < 2) {                                  // one retry, with the engine's reason, if the first try is invalid
         tries++;
-        const text = await speak(send, writer, prompt.system, messages, 'lina', { maxTokens: 120, fallback: byId(config.fallback) });
+        const text = await speak(send, writer, prompt.system, messages, 'lina', { maxTokens: 120, fallback: bestFallback(writer.id) });
         line = firstLine(text);
         if (!line) break;
         check = await lina('/check', { text: line });
@@ -603,7 +617,7 @@ async function handsSummary(r, send) {
   const active = byId(state.active) || allModels()[0];
   const out = String(r.stdout || '').slice(0, 3000), err = String(r.stderr || '').slice(0, 1000);
   const system = `${persona()}\n\nYou just ran a command on Mark's computer through Jarvis Hands. Tell him what the result means in at most two short sentences. ${VOICE_RULES}`;
-  await speak(send, active, system, [{ role: 'user', content: `Command: ${String(r.command || '').slice(0, 500)}\nExit code: ${r.code}\nOutput:\n${out || '(none)'}${err ? '\nErrors:\n' + err : ''}` }], 'answer', { fallback: byId(config.fallback), maxTokens: 200 });
+  await speak(send, active, system, [{ role: 'user', content: `Command: ${String(r.command || '').slice(0, 500)}\nExit code: ${r.code}\nOutput:\n${out || '(none)'}${err ? '\nErrors:\n' + err : ''}` }], 'answer', { fallback: bestFallback(active.id), maxTokens: 200 });
 }
 
 // ---------------------------------------------------------------- Edge Bot by voice (read-only)
