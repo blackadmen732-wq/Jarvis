@@ -9,8 +9,6 @@ import * as THREE from 'three';
 const FACE = { reactor: 0, floor: 0.45, hud: 0.6 };
 export const SCENES = {
   auto:      { label: 'Auto', ...FACE },
-  circuit:   { label: 'Circuit', ...FACE },
-  pulse:     { label: 'Pulse', ...FACE },
   portal:    { label: 'Portal', ...FACE, hud: 0.3 },
   plasma:    { label: 'Plasma', ...FACE },
   liquid:    { label: 'Liquid', ...FACE },
@@ -19,7 +17,6 @@ export const SCENES = {
   sun:       { label: 'Sun', reactor: 0, floor: 0.5, hud: 0.6 },
   reactor:   { label: 'Reactor', reactor: 1, floor: 1, hud: 1 },
   brain:     { label: 'Neural Brain', reactor: 0, floor: 1, hud: 1 },
-  stream:    { label: 'Data Stream', reactor: 1, floor: 0.45, hud: 1 },
 };
 
 const NOISE = /* glsl */`
@@ -174,8 +171,8 @@ export function createScenes(scene, { glow, mobile = false, reduce = false, pixe
     if (current === 'auto') {
       const home = SCENES[f.home] && f.home !== 'auto' ? f.home : 'blackhole';
       // while playing with the black hole (or Jarvis is driving the laptop) the core stays put
-      current = f.playOpen ? 'blackhole' : f.uiState === 'listening' ? 'pulse' : f.uiState === 'thinking' ? 'portal'
-        : f.uiState === 'speaking' ? (f.councilMode ? 'liquid' : 'plasma') : home;
+      current = f.playOpen ? 'blackhole' : f.uiState === 'listening' ? 'liquid' : f.uiState === 'thinking' ? 'portal'
+        : f.uiState === 'speaking' ? (f.councilMode ? 'brain' : 'plasma') : home;   // circuit, pulse, stream retired (Nov 22)
     }
     const k = started ? Math.min(1, dt * 1.8) : 1; started = true;   // no fade on first load
     for (const key of Object.keys(vis)) vis[key] += ((current === key ? 1 : 0) - vis[key]) * k;

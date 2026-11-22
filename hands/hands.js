@@ -22,9 +22,10 @@ const HUD_ORIGINS = new Set((process.env.HUD_ORIGINS || 'http://localhost:3001,h
 const HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
 const HOME = path.join(os.homedir(), '.jarvis-hands');
 const WORKDIR = path.resolve(process.argv[2] || path.join(os.homedir(), 'jarvis-workspace'));
-const TIMEOUT_MS = 60e3, MAX_OUT = 8000, VERSION = '1.0';
+const TIMEOUT_MS = 60e3, MAX_OUT = 8000, VERSION = '1.1';
 
 let TOKEN = '';                       // set by start(); nothing is created when the HUD only loads the locked list
+let agents = null;                    // the agent team (agents.js), started by start()
 function start() {
   fs.mkdirSync(HOME, { recursive: true, mode: 0o700 });
   fs.mkdirSync(WORKDIR, { recursive: true });
@@ -46,11 +47,11 @@ function log(entry) {
 }
 const clip = s => (s.length > MAX_OUT ? s.slice(0, MAX_OUT) + `\n… (${s.length - MAX_OUT} more characters)` : s);
 
-function run(command) {
+function run(command, cwd = WORKDIR) {
   return new Promise(resolve => {
     const t0 = Date.now();
     const shell = process.platform === 'win32' ? 'powershell.exe' : (process.env.SHELL || '/bin/sh');
-    exec(command, { cwd: WORKDIR, timeout: TIMEOUT_MS, maxBuffer: 4e6, shell, windowsHide: true }, (err, stdout, stderr) => {
+    exec(command, { cwd, timeout: TIMEOUT_MS, maxBuffer: 4e6, shell, windowsHide: true }, (err, stdout, stderr) => {
       const code = err ? (err.killed ? 'timeout' : (typeof err.code === 'number' ? err.code : 1)) : 0;
       resolve({ code, stdout: clip(String(stdout || '')), stderr: clip(String(stderr || '')), ms: Date.now() - t0 });
     });
@@ -88,6 +89,14 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (req.method === 'GET' && url.pathname === '/info')
     return send(200, { ok: true, version: VERSION, os: `${os.type()} ${os.release()} (${process.platform})`, shell: process.platform === 'win32' ? 'PowerShell' : path.basename(process.env.SHELL || 'sh'), cwd: WORKDIR });
+  if (req.method === 'GET' && url.pathname === '/agents')
+    return send(200, { ok: true, agents: agents.load(), running: [...agents.running.keys()] });
+  if (req.method === 'GET' && url.pathname === '/runs') {
+    const id = url.searchParams.get('id');
+    if (id) { const r = agents.getRun(id); return r ? send(200, { ok: true, run: r }) : send(404, { error: 'no such run' }); }
+    const a = url.searchParams.get('agent'); const ag = a ? agents.find(a) : null;
+    return send(200, { ok: true, runs: agents.recentRuns(ag ? ag.id : null, 8) });
+  }
   if (req.method !== 'POST' || !/^application\/json\b/i.test(String(req.headers['content-type'] || ''))) return send(400, { error: 'JSON POST only' });
   const b = await readBody(req);
   if (url.pathname === '/run') {
@@ -102,16 +111,28 @@ const server = http.createServer(async (req, res) => {
     try { const href = openUrl(String(b.url || '')); log({ action: 'open', url: href }); return send(200, { ok: true, url: href }); }
     catch (e) { return send(400, { error: e.message }); }
   }
+  try {
+    if (url.pathname === '/agents') return send(200, { ok: true, agent: agents.upsert(b) });
+    if (url.pathname === '/agents/delete') {
+      const a = agents.find(b.name); if (!a) return send(404, { error: `no agent called ${b.name}` });
+      agents.remove(a.id); return send(200, { ok: true, removed: a.name });
+    }
+    if (url.pathname === '/agents/run') {
+      const a = agents.find(b.name); if (!a) return send(404, { error: `no agent called ${b.name}` });
+      return send(200, { ok: true, agent: a.name, ...(await agents.runAgent(a, String(b.task || ''), 'asked')) });
+    }
+  } catch (e) { return send(400, { error: e.message }); }
   send(404, { error: 'not found' });
 });
 
 if (require.main === module) {
   start();
+  agents = require('./agents.js').create({ home: HOME, workdir: WORKDIR, run, openUrl, lockedReason, log });
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`\n  Jarvis Hands is on (http://127.0.0.1:${PORT}). Work folder: ${WORKDIR}`);
     console.log(`  Pairing code: ${TOKEN}`);
     console.log(`  In the HUD, type:  hands code ${TOKEN}`);
-    console.log('  Jarvis shows every command and runs it only after you say "confirm". Ctrl+C turns Hands off.\n');
+    console.log('  Agents and routines run here while this window is open. Ctrl+C turns Hands (and all agents) off.\n');
   });
 }
 module.exports = { lockedReason, LOCKED };

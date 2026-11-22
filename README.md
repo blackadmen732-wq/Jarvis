@@ -241,12 +241,12 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
   | Jarvis is… | Core becomes |
   |---|---|
   | idle | your **home core** (Black Hole unless you pick another) |
-  | listening to you | **Pulse Sphere**: glowing spikes rippling with your voice |
+  | listening to you | **Liquid Glass**: a shimmering glass blob |
   | thinking / routing | **Warp Portal**: data streaks rushing into a glowing ring |
   | speaking | **Plasma Orb**: bright heart with electric veins |
-  | council speaking | **Liquid Glass**: a shimmering glass blob |
+  | council speaking | **Neural Brain**: many minds at work |
 
-  You can also lock any core: **Bloom** (thousands of shimmering fibres forming slowly turning petals), **Black Hole** (real light-bending, glowing accretion disk, planets orbiting, your models circle it like satellites), **Sun** (boiling surface, bright limb, looping prominences), **Circuit Sphere**, **Pulse**, **Plasma**, **Portal**, **Liquid**, **Reactor**, **Neural Brain**, **Data Stream**. Say *"black hole mode"*, *"plasma core"*, *"make the core a sun"*, or *"auto mode"* to go back. The last core you lock becomes the idle core in Auto.
+  You can also lock any core: **Bloom** (thousands of shimmering fibres forming slowly turning petals), **Black Hole** (real light-bending, glowing accretion disk, planets orbiting, your models circle it like satellites), **Sun** (boiling surface, bright limb, looping prominences), **Plasma**, **Portal**, **Liquid**, **Reactor**, **Neural Brain**. (Circuit, Pulse and Data Stream were removed because they looked muddy; saying their names picks the closest core that's left.) Say *"black hole mode"*, *"plasma core"*, *"make the core a sun"*, or *"auto mode"* to go back. The last core you lock becomes the idle core in Auto.
 - **● Colour** cycles the theme: Amber, Ice (blue), Violet, Crimson, Emerald, Gold. Everything follows: core, disk, sun, panels. Or say *"change colour to blue"*.
 - **The live connection to your active model:**
   - warm colours (Amber, Gold, Crimson): a **solar flare** rises from the core, arcs out and loops around the model you're using. Switch models and a new flare grows toward the new one.
@@ -283,7 +283,7 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 | "Status" | Which model is active, what's online |
 | "List models" | Reads out your models |
 | "Use a female voice" / "switch voice to George" | Changes Jarvis's voice |
-| "Auto mode" / "black hole mode" / "sun mode" / "bloom mode" / "plasma core" / "circuit sphere" | Change the core |
+| "Auto mode" / "black hole mode" / "sun mode" / "bloom mode" / "plasma core" / "neural brain mode" | Change the core |
 | "Change colour to blue" / "purple theme" | Change the colour theme |
 | "Hide the holograms" / "show the holograms" | Holographic layer on/off |
 | "Throw a star in" / "send light" / "feed it gas" / "drop a planet" / "clear the black hole" | Play with the black hole |
@@ -295,6 +295,7 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 | "List my Lina rules" | Reads your saved rules |
 | "How did the bots do?" / "bot report" | Last night's Edge Bot training results (read-only, paper money) |
 | "Computer, how much disk space do I have?" / "run git status" / "open youtube" | Jarvis Hands: runs ONE step on your computer and explains the result (see section 11) |
+| "Create an agent called scout that …" / "ask scout to …" / "list my agents" | Your team of agents (see section 12) |
 | Anything else | Answered by the active model (or the council) |
 
 **Council mode (AIs talking to each other):** the council members answer one after another. Each sees what the others said and agrees, adds or disagrees by name. Then Jarvis (your active model) gives the final verdict, which is the part spoken out loud. Default council: Nemotron Ultra + GPT-OSS (Groq) + Qwen (Cerebras); a full round takes about 4 seconds. Each round uses one request per member + one for the verdict.
@@ -379,6 +380,24 @@ This installs the tools (xdotool, scrot, ImageMagick), starts the helper and mak
 > **On a Chromebook:** Linux runs in its own box there, so laptop control only sees and drives **Linux apps** (the terminal, Linux Firefox, files in the Linux folder), not ChromeOS or the Chrome browser itself. Jarvis Hands (section 11) works the same way: commands run inside Linux. To let Jarvis use a browser on a Chromebook, install Firefox inside Linux (`sudo apt install firefox-esr`) and ask Jarvis to use that.
 >
 > **Be careful what you ask.** With control on, Jarvis can do anything you can: delete files, send messages, run commands. A log of every step is kept in `~/.local/state/jarvis-control.log`.
+
+## 12. Agents: your own team of bots
+
+Like Grok Bot's team: each agent has **one job**, works on **your computer** (inside Jarvis Hands) in **its own folder**, and can run on a **routine**. Jarvis is the chief of staff: you talk to Jarvis, Jarvis hands out the work.
+
+| Say | What happens |
+|---|---|
+| "Create an agent called scout that checks my disk space and cleans old downloads every day at 9am" | Hires *scout*: its job, plus a routine (also "every 30 minutes", "every 2 hours", "every morning", "every evening") |
+| "Ask scout to check how much space is left" | Scout works on it by itself, step by step: runs a command, reads the result, decides the next step, up to 12 steps. Each step shows in the Comms Log; Jarvis says the result |
+| "List my agents" / "who is on my team" | The team, their routines and what each did last |
+| "What did scout do" / "scout report" | The last run: task, every command, the result |
+| "Fire scout" | Removes the agent (its folder stays) |
+
+- **Needs Jarvis Hands running** (section 11). Agents keep running their routines while Hands is on, even with the HUD closed; when you open the HUD, Jarvis tells you which routines finished.
+- **Brain:** an agent thinks with the model that was active when you hired it (switch models first to choose). Local models are free and private; cloud ones are faster.
+- **Where things live:** each agent's folder is `~/jarvis-workspace/agents/<name>`, its runs are saved in `~/.jarvis-hands/runs/`, the team in `~/.jarvis-hands/agents.json`.
+- **Your rules** (the `LOCKED` list in `hands/hands.js`) apply to every command an agent runs. Steps per run: `AGENT_MAX_STEPS` (default 12).
+- **Not yet:** app connectors (Gmail, Slack). The video's Grok Bot clone uses Composio for those; that would need a Composio key.
 
 ---
 

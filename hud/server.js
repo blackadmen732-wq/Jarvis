@@ -137,6 +137,20 @@ async function resolveModel(query) {
   return entry;
 }
 
+// "every day at 9am", "every morning", "every 30 minutes", "every hour" -> a routine; the rest is the job
+function parseRoutine(text) {
+  let s = String(text || '').trim(), every_minutes = null, at = null, m;
+  const cut = re => { s = s.replace(re, ' ').replace(/\s+/g, ' ').replace(/^[\s,]+|[\s,.]+$/g, ''); };
+  if ((m = s.match(/\b(?:every|each) (\d+) ?(minutes?|mins?|hours?|hrs?)\b/i))) { every_minutes = +m[1] * (/^h/i.test(m[2]) ? 60 : 1); cut(m[0]); }
+  else if ((m = s.match(/\b(?:every|each) (minute|hour)\b|\bhourly\b/i))) { every_minutes = /minute/i.test(m[0]) ? 1 : 60; cut(m[0]); }
+  else if ((m = s.match(/\b(?:every ?day|daily|each day|every (morning|evening|night))(?: at (\d{1,2})(?::(\d{2}))? ?(am|pm|a\.m\.|p\.m\.)?)?/i))) {
+    let h = m[2] ? +m[2] : /evening|night/i.test(m[1] || '') ? 19 : 9; const mm = m[3] || '00';
+    if (m[4] && /p/i.test(m[4]) && h < 12) h += 12; if (m[4] && /a/i.test(m[4]) && h === 12) h = 0;
+    at = `${String(h).padStart(2, '0')}:${mm}`; cut(m[0]);
+  }
+  return { role: s, task: s, every_minutes, at };
+}
+
 function parseCommand(text) {
   const raw = String(text || '').trim().replace(/^(hey |ok |okay )?jarvis[\s,:]*/i, '');
   let m;
@@ -155,7 +169,7 @@ function parseCommand(text) {
       (m = t.match(/^(?:switch|change|set) (?:the )?scene (?:to )?(auto|black hole|blackhole|sun|circuit|pulse|plasma|portal|liquid|bloom|flower|neural brain|brain|neural|data stream|stream|reactor|normal|default)$/)) ||
       (m = t.match(/^(?:make|turn|change)(?: the)? (?:core|center|centre|middle)(?: into| to)?(?: a| the)? (black hole|sun|star|reactor|brain|circuit|plasma|portal|liquid|pulse)$/))) {
     const k = m[1];
-    return { action: 'scene', scene: /auto|adaptive/.test(k) ? 'auto' : /circuit/.test(k) ? 'circuit' : /pulse|spike/.test(k) ? 'pulse' : /plasma/.test(k) ? 'plasma' : /portal|warp|vortex/.test(k) ? 'portal' : /liquid|glass/.test(k) ? 'liquid' : /bloom|flower/.test(k) ? 'bloom' : /black ?hole|singularity/.test(k) ? 'blackhole' : /sun|star|solar/.test(k) ? 'sun' : /brain|neural/.test(k) ? 'brain' : /stream|flow/.test(k) ? 'stream' : 'reactor' };
+    return { action: 'scene', scene: /auto|adaptive/.test(k) ? 'auto' : /circuit/.test(k) ? 'plasma' : /pulse|spike/.test(k) ? 'liquid' : /plasma/.test(k) ? 'plasma' : /portal|warp|vortex/.test(k) ? 'portal' : /liquid|glass/.test(k) ? 'liquid' : /bloom|flower/.test(k) ? 'bloom' : /black ?hole|singularity/.test(k) ? 'blackhole' : /sun|star|solar/.test(k) ? 'sun' : /brain|neural/.test(k) ? 'brain' : /stream|flow/.test(k) ? 'brain' : 'reactor' };   // circuit, pulse and data stream were retired
   }
   // laptop control: "take control of my laptop (and open firefox)", "stop" / "release control"
   if ((m = t.match(/^(?:please |can you |i want you to )?(?:take|get|grab|have) (?:full )?(?:control|over)(?: of| over)?(?: my| the)?(?: laptop| computer| pc| desktop| screen| machine| mouse)?(?:(?:,| and| then| to)\s+(.+))?$/)))
@@ -181,6 +195,15 @@ function parseCommand(text) {
   if (/^(stop|end|disable|close|turn off|exit)( the)? council|council (mode )?(off|stop)/.test(t)) return { action: 'council', on: false };
   if (/^(status|system status|report|diagnostics)$|^(which|what) model( are you| is active| are we)/.test(t)) return { action: 'status' };
   if (/^(list|show|what are)( the| my| your)? models|^what models/.test(t)) return { action: 'list' };
+  // Agents (hands/agents.js): Jarvis is the chief of staff of a team of bots that work on your computer
+  if ((m = raw.match(/^(?:create|make|build|add|set up|spin up|hire)(?: me)?(?: a| an| new)* (?:agent|bot)(?: called| named)?\s+["']?([\w-]+)["']?\s*(?:,|:|that|to|who|which|whose job is to|for)?\s+(.+)$/i)))
+    return { action: 'agent', op: 'create', name: m[1], ...parseRoutine(m[2]) };
+  if ((m = raw.match(/^(?:ask|tell|have|get|send)\s+(?:the |my |agent |bot )*([\w-]+?)(?: agent| bot)?\s+to\s+(.+)$/i)) && !/^(me|him|her|them|us|it|jarvis|you|everyone)$/i.test(m[1]))
+    return { action: 'agent', op: 'run', name: m[1], task: m[2].replace(/[.!?]+$/, '') };
+  if ((m = t.match(/^run (?:the |my )?([\w-]+) (?:agent|bot)(?: now)?$/))) return { action: 'agent', op: 'run', name: m[1], task: '' };
+  if (/^((list|show)( me)?( my| the| all)? (agents|bots|team)|who is on (my|the) team|my (agents|team))$/.test(t)) return { action: 'agent', op: 'list' };
+  if ((m = t.match(/^(?:delete|remove|fire) (?:the |my )?(?:agent |bot )?([\w-]+)(?: agent| bot)?$/))) return { action: 'agent', op: 'delete', name: m[1] };
+  if ((m = t.match(/^what (?:did|has) (?:the |my )?([\w-]+)(?: agent| bot)? (?:do|done|find|found)|^([\w-]+) (?:agent |bot )?report$/))) return { action: 'agent', op: 'report', name: m[1] || m[2] };
   // Jarvis Hands (your computer): "computer, ...", "on my computer ...", "terminal ...", "run ...", "open <site>"
   if ((m = raw.match(/^(?:(?:on |use )?(?:my |the )?(?:computer|laptop|terminal|pc|mac|chromebook)|run|execute)\s*[:,-]?\s+(.+)$/i)) && m[1].trim()) return { action: 'hands', text: m[1].trim() };
   if ((m = raw.match(/^(?:open|browse to|launch|pull up)\s+(?:the |a )?(?:website |site |page |url )?(\S.*)$/i))) return { action: 'hands', text: 'open ' + m[1].trim() };
@@ -360,6 +383,15 @@ async function handleChat(body, send) {
   }
   if (cmd && cmd.action === 'edgebot') return say(await edgebotReport());
   if (cmd && cmd.action === 'hands') return handsPlan(cmd.text, body.hands, send, say);
+  if (cmd && cmd.action === 'agent') {
+    if (!body.hands || !body.hands.cwd) return say('Agents live in Jarvis Hands on your computer. Run node hands/hands.js, then type: hands code, and the code it shows.');
+    const brain = byId(state.active) || allModels()[0];
+    send({ type: 'command', action: 'agent', ...cmd, model: cmd.op === 'create' ? brain.model : undefined });
+    const when = cmd.at ? ` every day at ${cmd.at}` : cmd.every_minutes ? ` every ${cmd.every_minutes >= 60 && cmd.every_minutes % 60 === 0 ? cmd.every_minutes / 60 + ' hour' + (cmd.every_minutes > 60 ? 's' : '') : cmd.every_minutes + ' minutes'}` : '';
+    return say(({ create: `Hiring ${cmd.name}. Job: ${cmd.role}.${when ? ' Routine:' + when + '.' : ''} It thinks with ${brain.label}.`,
+      run: `Sending ${cmd.name} off${cmd.task ? ' to ' + cmd.task : ' on its usual job'}. I'll report back.`, list: 'Here is the team.',
+      delete: `Letting ${cmd.name} go.`, report: `Checking what ${cmd.name} did.` })[cmd.op]);
+  }
   if (cmd && cmd.action === 'hands_status') return say(body.hands ? `Hands connected on ${body.hands.os}. Work folder: ${body.hands.cwd}. Say "hands disconnect" in the HUD to unpair.` : 'Hands are not connected. Run node hands/hands.js on your computer, then type: hands code, and the code it shows.');
   if (cmd && cmd.action === 'list') {
     return say('Available: ' + allModels().filter(m => m.installed).map(m => m.label).join(', ') + '.');
@@ -641,4 +673,4 @@ refreshHealth().finally(() => server.listen(PORT, () => {
   console.log(`Jarvis HUD on http://localhost:${PORT}  (router ${ROUTER}, ollama ${OLLAMA})`);
 }));
 
-module.exports = { parseCommand, norm, allowed, firstLine };
+module.exports = { parseCommand, parseRoutine, norm, allowed, firstLine };

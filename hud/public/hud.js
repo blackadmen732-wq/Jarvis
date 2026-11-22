@@ -18,6 +18,7 @@
   let voiceOn = store.get('voice', true), wakeOn = false;
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   let fxOn = store.get('fx', true), lastType = 0, ac = null, holoOn = store.get('holo', true), sceneName = store.get('scene2', 'auto'), homeCore = store.get('home', 'blackhole'), themeName = store.get('theme', 'amber');
+  { const R = { circuit: 'plasma', pulse: 'liquid', stream: 'brain' }; sceneName = R[sceneName] || sceneName; homeCore = R[homeCore] || homeCore; }   // retired cores
   if (sceneName === 'space') sceneName = 'auto';
   document.body.dataset.scene = sceneName;
   const GLYPHS = '▓▒░<>/\\|=+*#ABCDEF0123456789';
@@ -474,7 +475,7 @@
   // This page (in YOUR browser, on your computer) is what talks to Jarvis Hands, never the server in Docker.
   // Pair once: start `node hands/hands.js`, then type "hands code <code>". Steps run straight away.
   const HANDS = 'http://localhost:3003';   // Jarvis Hands (terminal); laptop control is 3002
-  let handsToken = store.get('handsToken', ''), handsInfo = null, queuedStep = null;
+  let handsToken = store.get('handsToken', ''), handsInfo = null, queuedStep = null, queuedAgent = null;
   async function handsFetch(p, body) {
     const r = await fetch(HANDS + p, body ? { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': handsToken }, body: JSON.stringify(body) }
                                           : { headers: { 'x-jarvis-token': handsToken } });
@@ -505,6 +506,60 @@
       return r;
     } catch (e) { addMsg('err', 'Hands', e.message); return null; }
   }
+
+  // ------------------------------------------------------------------ agents (hands/agents.js, on your computer)
+  const seenRuns = new Set(store.get('seenRuns', []));
+  const markSeen = id => { seenRuns.add(id); store.set('seenRuns', [...seenRuns].slice(-200)); };
+  const routineText = a => a.at ? `every day at ${a.at}` : a.every_minutes ? `every ${a.every_minutes} min` : 'on request';
+  function say(text) { addMsg('sys', 'Jarvis', text); speakText(text); }
+  async function watchRun(runId, name) {
+    markSeen(runId); let shown = 0;
+    for (let i = 0; i < 400; i++) {                      // up to ~20 minutes
+      await new Promise(r => setTimeout(r, 2500));
+      let run; try { run = (await handsFetch('/runs?id=' + encodeURIComponent(runId))).run; } catch { continue; }
+      for (; shown < run.steps.length; shown++) {
+        const st = run.steps[shown];
+        const head = st.action === 'run' ? `$ ${st.command}` : st.action === 'open' ? `open ${st.url}` : '(unclear reply, asked again)';
+        addMsg('sys hands-out', `${name} · step ${shown + 1}`, `${head}${st.why ? '   # ' + st.why : ''}\n${String(st.result || '').trim()}`);
+      }
+      if (run.status !== 'running') { say(`${name}: ${run.summary || run.status}`); return; }
+    }
+  }
+  async function agentOp(d) {
+    try {
+      if (d.op === 'create') {
+        const { agent: a } = await handsFetch('/agents', { name: d.name, role: d.role, task: d.task, model: d.model, every_minutes: d.every_minutes, at: d.at });
+        say(`${a.name} is on the team. Job: ${a.role}. Routine: ${routineText(a)}. Say "ask ${a.name} to ..." to give it work.`);
+      } else if (d.op === 'list') {
+        const { agents, running } = await handsFetch('/agents');
+        if (!agents.length) return say('No agents yet. Say "create an agent called scout that ..." to hire one.');
+        addMsg('sys hands-out', 'Team', agents.map(a => `${a.name}${running.includes(a.id) ? ' (working)' : ''} · ${routineText(a)}\n  ${a.role}${a.last_summary ? '\n  last: ' + a.last_summary : ''}`).join('\n'));
+        speakText(`You have ${agents.length} agent${agents.length > 1 ? 's' : ''}: ${agents.map(a => a.name).join(', ')}.`);
+      } else if (d.op === 'delete') {
+        const r = await handsFetch('/agents/delete', { name: d.name }); say(`${r.removed} has left the team.`);
+      } else if (d.op === 'run') {
+        const r = await handsFetch('/agents/run', { name: d.name, task: d.task || '' });
+        if (r.already) { say(`${r.agent} is already working on something.`); return; }
+        watchRun(r.run, r.agent);
+      } else if (d.op === 'report') {
+        const { runs } = await handsFetch('/runs?agent=' + encodeURIComponent(d.name));
+        const last = runs[runs.length - 1];
+        if (!last) return say(`${d.name} hasn't done anything yet.`);
+        addMsg('sys hands-out', `${last.name} · last run (${last.why})`, `Task: ${last.task}\n${last.steps.map((s, i) => `${i + 1}. ${s.command ? '$ ' + s.command : s.url || s.action}`).join('\n')}`);
+        say(`${last.name}: ${last.summary || last.status}`);
+      }
+    } catch (e) { addMsg('err', 'Agents', e.message); }
+  }
+  // routines run on their own while Hands is on; tell Mark when one finishes
+  let primed = false;                                   // the first check only notes runs that finished before
+  setInterval(async () => {
+    if (!handsInfo) return;
+    try {
+      const { agents } = await handsFetch('/agents');
+      for (const a of agents) if (a.last_run && !seenRuns.has(a.last_run)) { markSeen(a.last_run); if (primed) say(`${a.name} finished its routine: ${a.last_summary || a.last_status}`); }
+      primed = true;
+    } catch {}
+  }, 20e3);
 
   // ------------------------------------------------------------------ chat
   let busy = false;
@@ -584,6 +639,7 @@
             if (d.action === 'hands_proposal') { addMsg('sys hands-out', 'Proposed step · waiting for "confirm"', d.step.action === 'open' ? `open ${d.step.url}` : `$ ${d.step.command}`); chime(520, 660); }
             if (d.action === 'hands_refused') { addMsg('err', 'Hands · locked', `$ ${d.command}\nRefused: ${d.reason}`); chime(300, 220); }
             if (d.action === 'hands_run') queuedStep = d.step;
+            if (d.action === 'agent') queuedAgent = d;
           } else if (d.type === 'council') {
             d.members.forEach((id, k) => setTimeout(() => beams.push({ from: S.active, to: id, life: 1.6 }), k * 150));
           } else if (d.type === 'done') {
@@ -599,6 +655,7 @@
     speakingId = null;
     if (!speaking) setState(wakeOn ? 'idle' : 'idle');
     refreshState();
+    if (queuedAgent) { const d = queuedAgent; queuedAgent = null; agentOp(d); }
     if (queuedStep) {                                   // run it on your computer, then explain the result
       const step = queuedStep; queuedStep = null;
       const r = await handsRun(step);
@@ -925,10 +982,12 @@
     if (announce) { const m = on ? 'Holographic systems online.' : 'Holograms offline.'; addMsg('sys', 'Jarvis', m); speakText(m); }
   }
   $('#t-holo').addEventListener('click', () => setHolo(!holoOn, false));
-  const SCENE_NAMES = { auto: 'Auto core', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit Sphere', pulse: 'Pulse Sphere', plasma: 'Plasma Orb', portal: 'Warp Portal', liquid: 'Liquid Glass', bloom: 'Bloom', reactor: 'Reactor', brain: 'Neural Brain', stream: 'Data Stream' };
-  const SCENE_SHORT = { auto: 'Auto', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit', pulse: 'Pulse', plasma: 'Plasma', portal: 'Portal', liquid: 'Liquid', bloom: 'Bloom', reactor: 'Reactor', brain: 'Brain', stream: 'Stream' };
-  const HOME_OK = ['blackhole', 'sun', 'circuit', 'pulse', 'plasma', 'portal', 'liquid', 'bloom', 'reactor'];
+  const SCENE_NAMES = { auto: 'Auto core', blackhole: 'Black Hole', sun: 'Sun', plasma: 'Plasma Orb', portal: 'Warp Portal', liquid: 'Liquid Glass', bloom: 'Bloom', reactor: 'Reactor', brain: 'Neural Brain' };
+  const SCENE_SHORT = { auto: 'Auto', blackhole: 'Black Hole', sun: 'Sun', plasma: 'Plasma', portal: 'Portal', liquid: 'Liquid', bloom: 'Bloom', reactor: 'Reactor', brain: 'Brain' };
+  const HOME_OK = ['blackhole', 'sun', 'plasma', 'portal', 'liquid', 'bloom', 'reactor', 'brain'];
+  const RETIRED = { circuit: 'plasma', pulse: 'liquid', stream: 'brain' };    // removed Nov 22 (looked muddy); old choices map here
   function setScene(name, announce) {
+    name = RETIRED[name] || name;
     if (!SCENE_NAMES[name]) return;
     sceneName = name; store.set('scene2', name); document.body.dataset.scene = name;
     if (HOME_OK.includes(name)) { homeCore = name; store.set('home', name); }
