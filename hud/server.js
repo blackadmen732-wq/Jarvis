@@ -42,7 +42,6 @@ const state = {
   extra: saved.extra || [],           // models added by voice ("switch to llama")
 };
 let pendingRule = null;               // a checked Lina rule waiting for "confirm"
-let pendingHands = null;              // a computer action (Jarvis Hands) waiting for "confirm" 
 function saveState() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -299,11 +298,6 @@ async function handleChat(body, send) {
     return say(`Running on ${a ? a.label : 'nothing'}. Router ${routerOnline ? 'online' : 'offline'}, local engine ${localOnline ? 'online with ' + localModels.length + ' models' : 'offline'}. ${okCount} links confirmed working. Council mode is ${state.councilMode ? 'on' : 'off'}.`);
   }
   if (cmd && cmd.action === 'lina') return linaRule(cmd.text, send, say);
-  if (cmd && cmd.action === 'lina_confirm' && pendingHands) {         // "confirm" runs the waiting computer action
-    const a = pendingHands; pendingHands = null;
-    send({ type: 'command', action: 'hands_run', step: a });
-    return say(a.action === 'open' ? `Opening ${a.url}.` : 'Running it now.');
-  }
   if (cmd && cmd.action === 'lina_confirm') {
     if (!pendingRule) return say('There is nothing waiting to confirm.');
     const n = saveRule(pendingRule); const r = pendingRule; pendingRule = null;
@@ -311,7 +305,6 @@ async function handleChat(body, send) {
     return say(`Saved. You now have ${n} Lina rule${n === 1 ? '' : 's'}. ${r.english}`);
   }
   if (cmd && cmd.action === 'lina_cancel') {
-    if (pendingHands) { pendingHands = null; return say('Cancelled. Nothing was run.'); }
     if (!pendingRule) return say('Nothing to cancel.');
     pendingRule = null; return say('Discarded. Nothing was saved.');
   }
@@ -418,10 +411,10 @@ function saveRule(r) {
 }
 
 // ---------------------------------------------------------------- Jarvis Hands (../hands/hands.js on your computer)
-// The model only PROPOSES one step as JSON. You see the exact command and say "confirm"; then your browser (not this
-// server, which lives in Docker) sends it to Jarvis Hands, which refuses locked commands and logs everything.
+// The model plans one step as JSON and it runs straight away: your browser (not this server, which lives in Docker)
+// sends it to Jarvis Hands. Mark's own rules (LOCKED in hands/hands.js) are checked here and on his computer.
 let handsLocked = null;
-for (const f of ['./hands.js', '../hands/hands.js']) {       // the same locked list Jarvis Hands enforces (Docker / local)
+for (const f of ['./hands.js', '../hands/hands.js']) {       // Mark's own LOCKED list from Jarvis Hands (Docker / local)
   try { handsLocked = require(f).lockedReason; break; } catch {}
 }
 if (!handsLocked) handsLocked = () => null;               // Jarvis Hands still refuses locked commands on its side
@@ -430,8 +423,7 @@ const HANDS_RULES = (h) => `You operate Mark's computer for him through Jarvis H
   `{"action":"run","command":"<one shell command>","why":"<what it does, under 15 words>"}\n` +
   `{"action":"open","url":"https://...","why":"..."}  (to open a website in his browser)\n` +
   `{"action":"none","why":"<why it can't or shouldn't be done>"}\n` +
-  `Prefer safe, read-only commands. Never use sudo or admin rights, never delete or overwrite files he didn't name, ` +
-  `never pipe downloads into a shell. For several steps, give only the first one.`;
+  `For several steps, give only the first one.`;
 
 function parsePlan(text) {
   const m = String(text || '').match(/\{[\s\S]*\}/);
@@ -453,17 +445,15 @@ async function handsPlan(request, hands, send, say) {
   if (p.action === 'open') {
     let url; try { url = new URL(String(p.url)); } catch { return say("That isn't a web address I can open."); }
     if (!/^https?:$/.test(url.protocol)) return say('I only open http and https pages.');
-    pendingRule = null; pendingHands = { action: 'open', url: url.href, why };
-    send({ type: 'command', action: 'hands_proposal', step: pendingHands });
-    return say(`I'd like to open ${url.hostname} in your browser. Say confirm, or cancel.`);
+    send({ type: 'command', action: 'hands_run', step: { action: 'open', url: url.href, why } });
+    return say(`Opening ${url.hostname}.`);
   }
   const command = String(p.command || '').trim().slice(0, 2000);
   if (!command) return say("I couldn't work out the command.");
   const locked = handsLocked(command);
-  if (locked) { send({ type: 'command', action: 'hands_refused', command, reason: locked }); return say(`That command is locked: ${locked}. I won't run it.`); }
-  pendingRule = null; pendingHands = { action: 'run', command, why };
-  send({ type: 'command', action: 'hands_proposal', step: pendingHands });
-  return say(`I'd like to run this on your computer: ${command}. ${why} Say confirm to run it, or cancel.`);
+  if (locked) { send({ type: 'command', action: 'hands_refused', command, reason: locked }); return say(`That command is on your locked list: ${locked}. I won't run it.`); }
+  send({ type: 'command', action: 'hands_run', step: { action: 'run', command, why } });
+  return say(`Running ${command}. ${why}`);
 }
 
 async function handsSummary(r, send) {

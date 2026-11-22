@@ -272,7 +272,7 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 | "Confirm" / "cancel" | Save or discard the Lina rule Jarvis just checked |
 | "List my Lina rules" | Reads your saved rules |
 | "How did the bots do?" / "bot report" | Last night's Edge Bot training results (read-only, paper money) |
-| "Computer, how much disk space do I have?" / "run git status" / "open youtube" | Jarvis Hands: proposes ONE step on your computer, runs it after "confirm" (see section 11) |
+| "Computer, how much disk space do I have?" / "run git status" / "open youtube" | Jarvis Hands: runs ONE step on your computer and explains the result (see section 11) |
 | Anything else | Answered by the active model (or the council) |
 
 **Council mode (AIs talking to each other):** the council members answer one after another. Each sees what the others said and agrees, adds or disagrees by name. Then Jarvis (your active model) gives the final verdict, which is the part spoken out loud. Default council: Nemotron Ultra + GPT-OSS (Groq) + Qwen (Cerebras); a full round takes about 4 seconds. Each round uses one request per member + one for the verdict.
@@ -322,16 +322,14 @@ Jarvis lives in Docker, which can't reach your computer. **Jarvis Hands** is a s
    Commands start in `~/jarvis-workspace`. To work in another folder: `node hands/hands.js ~/projects`.
 2. It prints a pairing code. In the HUD, type: `hands code <the code>`.
 3. Ask: *"Computer, how much disk space do I have?"*, *"run git status"*, *"open youtube"*.
-4. Jarvis shows the **exact command** and waits. Say **"confirm"** to run it (or **"cancel"**). You see the real output, and Jarvis tells you what it means.
+4. Jarvis works out the command, runs it straight away, shows you the exact command and its real output, and tells you what it means.
 
-**Safety:**
-- **Nothing runs without your "confirm".** One step at a time, and you always see the exact command first.
-- **Locked commands are refused on your computer itself**, whatever a model asks: admin rights (sudo), deleting whole folders or your home folder, formatting disks, shutting down, running downloaded scripts, changing passwords.
-- **Only this computer and only the HUD page:** Hands listens on 127.0.0.1, accepts only `localhost:3001` and needs the pairing code. Other websites can't use it.
-- **Everything is logged** in `~/.jarvis-hands/log.jsonl`.
-- **Off switch:** Ctrl+C in the Hands window, or type `hands disconnect` in the HUD.
+**Your rules:** Jarvis runs what it decides, with no built-in blocks. To stop it running certain commands, add your own lines to `LOCKED` at the top of `hands/hands.js`, for example `[/\bsudo\b/i, 'admin rights'],`. Then restart Hands and run `docker compose up -d --build hud`. Commands on your list are refused on your computer and in the HUD.
 
-> Models make mistakes. Read the command before you say confirm, especially anything that changes or deletes files.
+**What stays on:**
+- **The connection:** Hands listens on 127.0.0.1, only accepts the HUD page and needs the pairing code, so other websites you visit can't send commands to your computer.
+- **The log:** everything is recorded in `~/.jarvis-hands/log.jsonl`.
+- **The off switch:** Ctrl+C in the Hands window, or type `hands disconnect` in the HUD.
 
 ---
 

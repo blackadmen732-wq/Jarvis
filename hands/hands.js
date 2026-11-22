@@ -5,14 +5,10 @@
 //   node hands/hands.js                  work folder ~/jarvis-workspace
 //   node hands/hands.js ~/projects       work folder of your choice (commands start there)
 //
-// Safety, in layers:
-//   1. Only this computer: listens on 127.0.0.1, accepts only the HUD page (localhost:3001) as Origin.
-//   2. A pairing code: printed below when it starts; the HUD must send it with every request.
-//   3. Jarvis always asks first: the HUD shows the exact command and runs it only after you say "confirm".
-//   4. Locked commands: deleting the whole disk, formatting, shutting down, sudo/admin, piping downloads into a
-//      shell, fork bombs and the like are refused here, whatever the model or the page asks.
-//   5. A log of everything: ~/.jarvis-hands/log.jsonl (time, command, exit code).
-//   Stop it any time with Ctrl+C. While it isn't running, Jarvis can't touch your computer.
+// Jarvis runs what it decides straight away. Mark sets his own safety rules: add them to LOCKED below.
+// Connection: only this computer (127.0.0.1), only the HUD page as Origin, and the pairing code, so other websites
+// you visit can't send commands here. Everything is logged to ~/.jarvis-hands/log.jsonl.
+// Stop it any time with Ctrl+C. While it isn't running, Jarvis can't touch your computer.
 'use strict';
 const http = require('http');
 const fs = require('fs');
@@ -37,18 +33,11 @@ function start() {
   if (!/^[a-f0-9]{12}$/.test(TOKEN)) { TOKEN = crypto.randomBytes(6).toString('hex'); fs.writeFileSync(file, TOKEN, { mode: 0o600 }); }
 }
 
-// Commands no model or page can run through Jarvis. Checked here, on your computer, not just in the HUD.
+// YOUR RULES: commands Jarvis must never run. Empty on purpose: add your own lines, for example
+//   [/\bsudo\b/i, 'admin rights'],
+//   [/\brm\s+-rf\s+(\/|~)/i, 'deleting my whole disk or home folder'],
+// The HUD checks this same list before it runs anything (restart Hands and rebuild the HUD after changing it).
 const LOCKED = [
-  [/\bsudo\b|\bsu\s+-|\brunas\b|\bdoas\b/i, 'admin rights (sudo)'],
-  [/\brm\s+(-[a-z]*\s+)*-?[a-z]*[rf][a-z]*\s+(-[a-z]+\s+)*(\/|~|\$home|\*|\.\.?)(\s|$|\/\s*$)/i, 'deleting a whole folder tree'],
-  [/\b(mkfs|fdisk|diskpart|format\s+[a-z]:)/i, 'formatting a disk'],
-  [/\bdd\b.*\bof=\/dev\//i, 'writing raw to a disk'],
-  [/\b(shutdown|reboot|halt|poweroff|init\s+[06])\b|stop-computer|restart-computer/i, 'shutting down or restarting'],
-  [/:\(\)\s*\{|\bfork\s*bomb/i, 'a fork bomb'],
-  [/(curl|wget|iwr|invoke-webrequest)\b[^|]*\|\s*(ba|z|da)?sh\b|\|\s*iex\b/i, 'running a downloaded script'],
-  [/>\s*\/dev\/(sd|nvme|disk)|\bchmod\s+-r\s+777\s+\//i, 'damaging system files'],
-  [/remove-item\b.*-recurse\b.*\b[a-z]:\\\s*$|\brd\s+\/s\b|\bdel\s+\/[sq]\b.*\\\*/i, 'deleting a whole folder tree'],
-  [/\b(passwd|chpasswd|net\s+user)\b/i, 'changing passwords'],
 ];
 function lockedReason(cmd) { for (const [re, why] of LOCKED) if (re.test(cmd)) return why; return null; }
 

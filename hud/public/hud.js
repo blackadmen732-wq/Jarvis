@@ -441,7 +441,7 @@
 
   // ------------------------------------------------------------------ Jarvis Hands (your computer, ../../hands/hands.js)
   // This page (in YOUR browser, on your computer) is what talks to Jarvis Hands, never the server in Docker.
-  // Pair once: start `node hands/hands.js`, then type "hands code <code>". Every step waits for "confirm".
+  // Pair once: start `node hands/hands.js`, then type "hands code <code>". Steps run straight away.
   const HANDS = 'http://localhost:3002';
   let handsToken = store.get('handsToken', ''), handsInfo = null, queuedStep = null;
   async function handsFetch(p, body) {
@@ -455,7 +455,7 @@
     if (!handsToken) { handsInfo = null; return false; }
     try {
       handsInfo = await handsFetch('/info');
-      if (!quiet) { addMsg('sys', 'Jarvis', `Hands connected to ${handsInfo.os}. Work folder: ${handsInfo.cwd}. I'll show you every step and wait for "confirm".`); chime(660, 990); }
+      if (!quiet) { addMsg('sys', 'Jarvis', `Hands connected to ${handsInfo.os}. Work folder: ${handsInfo.cwd}.`); chime(660, 990); }
       return true;
     } catch (e) {
       handsInfo = null;
@@ -565,7 +565,7 @@
     speakingId = null;
     if (!speaking) setState(wakeOn ? 'idle' : 'idle');
     refreshState();
-    if (queuedStep) {                                   // you said "confirm": run it on your computer, then explain
+    if (queuedStep) {                                   // run it on your computer, then explain the result
       const step = queuedStep; queuedStep = null;
       const r = await handsRun(step);
       if (r) send('result', { hands_result: r });
