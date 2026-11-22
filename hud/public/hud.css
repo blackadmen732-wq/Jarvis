@@ -346,3 +346,16 @@ body.bh-mode #t-play, body[data-scene="auto"] #t-play, body[data-scene="blackhol
 .kbd { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--dim); font-size: 16px; cursor: pointer; }
 .kbd:hover, .dock-input.typing .kbd { color: var(--amber-hot); border-color: var(--amber); }
 @media (max-width: 520px) { .voice-hint { display: none; } }
+
+/* API keys form (saved by Jarvis Hands into .env on this computer) */
+.kp-note { font-size: 12px; color: var(--dim); margin: 4px 0 10px; line-height: 1.45; }
+.kp-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; margin-bottom: 10px; }
+.kp-row label { font: 500 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--text); }
+.kp-row a { font: 400 10px var(--mono); color: var(--amber); text-decoration: none; justify-self: end; }
+.kp-row input { grid-column: 1 / -1; background: rgba(255,255,255,.04); border: 1px solid var(--line); color: var(--text); padding: 7px 9px; font: 400 12px var(--mono); border-radius: 4px; }
+.kp-row input:focus { outline: none; border-color: var(--amber); }
+.kp-row .kp-set { grid-column: 1 / -1; font: 400 10px var(--mono); color: #7dffc6; }
+.kp-row .kp-set.no { color: var(--dim); }
+.kp-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 4px; }
+#keys-msg { font-size: 12px; color: var(--dim); }
+.keys-panel { max-height: min(70vh, 640px); overflow: auto; }

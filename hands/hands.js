@@ -40,6 +40,36 @@ function start() {
 // The HUD checks this same list before it runs anything (restart Hands and rebuild the HUD after changing it).
 const LOCKED = [
 ];
+// ---- the Keys form (HUD -> Hands): API keys go straight into Jarvis's .env on this computer. Only these names,
+// one line each; the values are never sent back (the HUD only learns which keys are set).
+const KEY_NAMES = ['GROQ_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_NIM_API_KEY', 'ZAI_API_KEY', 'CEREBRAS_API_KEY', 'JARVIS_SYNC_TOKEN'];
+const REPO = path.join(__dirname, '..');
+const ENV_FILE = path.join(REPO, '.env');
+function readEnv() {
+  try { return fs.readFileSync(ENV_FILE, 'utf8'); }
+  catch { try { return fs.readFileSync(path.join(REPO, '.env.example'), 'utf8'); } catch { return ''; } }
+}
+function keyStatus() {
+  const env = readEnv();
+  return Object.fromEntries(KEY_NAMES.map(k => { const m = env.match(new RegExp('^' + k + '=(.*)$', 'm')); const v = m ? m[1].trim() : '';
+    return [k, !!v && !/PASTE|YOUR_KEY|^<|^\.\.\.$/i.test(v)]; }));
+}
+function saveKeys(input) {
+  let env = readEnv(); const saved = [];
+  for (const k of KEY_NAMES) {
+    const v = String(input[k] ?? '').trim();
+    if (!v || !/^[\x21-\x7e]{8,300}$/.test(v)) continue;               // one printable token: no spaces, newlines or quotes tricks
+    const line = `${k}=${v}`, re = new RegExp('^' + k + '=.*$', 'm');
+    env = re.test(env) ? env.replace(re, () => line) : env.replace(/\n?$/, '\n') + line + '\n';
+    saved.push(k);
+  }
+  if (saved.length) { fs.writeFileSync(ENV_FILE, env, { mode: 0o600 }); log({ action: 'keys', saved }); }   // names only in the log
+  return saved;
+}
+function restartForKeys() {                                 // the router and HUD read keys when they start
+  spawn('docker', ['compose', 'up', '-d', '--force-recreate', 'router', 'hud'], { cwd: REPO, detached: true, stdio: 'ignore' }).unref();
+}
+
 function lockedReason(cmd) { for (const [re, why] of LOCKED) if (re.test(cmd)) return why; return null; }
 
 function log(entry) {
@@ -89,6 +119,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (req.method === 'GET' && url.pathname === '/info')
     return send(200, { ok: true, version: VERSION, os: `${os.type()} ${os.release()} (${process.platform})`, shell: process.platform === 'win32' ? 'PowerShell' : path.basename(process.env.SHELL || 'sh'), cwd: WORKDIR });
+  if (req.method === 'GET' && url.pathname === '/keys') return send(200, { ok: true, keys: keyStatus() });
   if (req.method === 'GET' && url.pathname === '/brains') return send(200, { ok: true, brains: require('./brains.js').list() });
   if (req.method === 'GET' && url.pathname === '/agents')
     return send(200, { ok: true, agents: agents.load(), running: [...agents.running.keys()] });
@@ -115,6 +146,11 @@ const server = http.createServer(async (req, res) => {
     catch (e) { return send(400, { error: e.message }); }
   }
   try {
+    if (url.pathname === '/keys') {                       // the Keys form in the HUD: save to .env, restart the router
+      const saved = saveKeys(b.keys || {});
+      if (saved.length) restartForKeys();
+      return send(200, { ok: true, saved, keys: keyStatus() });
+    }
     if (url.pathname === '/brain') {                     // your own Claude / ChatGPT account, via Claude Code / Codex
       const r = await require('./brains.js').think(String(b.engine || ''), String(b.prompt || ''), { system: String(b.system || ''), cwd: WORKDIR });
       log({ action: 'brain', engine: b.engine, ok: r.ok, ms: r.ms });

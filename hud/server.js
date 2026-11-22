@@ -335,6 +335,7 @@ function parseCommand(text) {
   const t = norm(text).replace(/^(hey |ok |okay )?jarvis\s*/, '');
   if (/^(?:switch to |turn on |go |be |use |enable )?(?:the )?(grok|rebel|fun|unfiltered|spicy) (mode|personality)( on)?$/.test(t)) return { action: 'personality', personality: 'grok' };
   if (/^(?:switch to |turn on |go |be |use |enable )?(?:the )?(serious|polite|formal|calm|butler) (mode|personality)( on)?$|^(grok|rebel|fun) mode off$/.test(t)) return { action: 'personality', personality: 'classic' };
+  if (/^(open|show|add|enter|set up|edit|change)( my| the)? (api )?(keys?|api keys?|settings)$|^(add|put in|enter) (my )?(groq|gemini|grok|openrouter|nvidia) (api )?key$/.test(t)) return { action: 'keys' };
   if (/^(?:switch to |turn on |go |use |set )?(?:the )?(eco|battery|power saving|low power|performance|cool|quiet)(?: mode| quality)?( on)?$/.test(t)) return { action: 'quality', level: 'eco' };
   if (/^(?:switch to |turn on |go |use |set )?(?:the )?(high|full|max|maximum|best|ultra) (quality|graphics|detail|mode)$|^(eco|battery) mode off$/.test(t)) return { action: 'quality', level: 'high' };
   if (/^(?:switch to |use |set )?(?:the )?auto(?:matic)? (quality|graphics)$/.test(t)) return { action: 'quality', level: 'auto' };
@@ -520,6 +521,7 @@ async function handleChat(body, send) {
     state.personality = cmd.personality; saveState();
     return say(cmd.personality === 'grok' ? 'Grok mode. Filters off, jokes on. What are we breaking today?' : 'Serious mode, sir. Calm and polite from here on.');
   }
+  if (cmd && cmd.action === 'keys') { send({ type: 'command', action: 'keys' }); return say('Opening the keys form. Paste each key, then press Save. They stay on this computer.'); }
   if (cmd && cmd.action === 'quality') {
     send({ type: 'command', action: 'quality', level: cmd.level });
     return say(({ eco: 'Eco mode: 30 frames a second, lighter effects, and I go quiet when you do. Your laptop stays cool.',

@@ -601,6 +601,44 @@
     if (!speaking) setState('idle');
   }
 
+  // ---- API keys form: Hands writes them into .env on this computer and restarts the model router
+  const KEYS = [
+    ['GROQ_API_KEY', 'Groq (fast, free)', 'https://console.groq.com/keys'],
+    ['OPENROUTER_API_KEY', 'OpenRouter (free models; Grok and Claude with credit)', 'https://openrouter.ai/keys'],
+    ['GEMINI_API_KEY', 'Gemini (free, small)', 'https://aistudio.google.com/apikey'],
+    ['NVIDIA_NIM_API_KEY', 'NVIDIA (Nemotron, Kimi)', 'https://build.nvidia.com/settings/api-keys'],
+    ['ZAI_API_KEY', 'Z.ai (GLM)', 'https://z.ai/manage-apikey/apikey-list'],
+    ['JARVIS_SYNC_TOKEN', 'Supabase sync code (your own random code)', ''],
+  ];
+  async function openKeys() {
+    const panel = $('#keys-panel'), form = $('#keys-form'), msg = $('#keys-msg');
+    if (!handsInfo) { addMsg('sys', myName(), 'The keys form saves through Jarvis Hands on your computer. Open Jarvis from its app icon (it starts Hands), then try again.'); return; }
+    let have = {}; try { have = (await handsFetch('/keys')).keys; } catch (e) { addMsg('err', 'Keys', e.message); return; }
+    form.innerHTML = '';
+    for (const [k, label, link] of KEYS) {
+      const row = document.createElement('div'); row.className = 'kp-row';
+      row.innerHTML = `<label for="kp-${k}"></label>${link ? `<a target="_blank" rel="noopener" href="${link}">get a key ↗</a>` : '<span></span>'}<input id="kp-${k}" type="password" spellcheck="false"><span class="kp-set"></span>`;
+      row.querySelector('label').textContent = label;
+      const st = row.querySelector('.kp-set'); st.textContent = have[k] ? '✓ saved' : 'not set'; st.classList.toggle('no', !have[k]);
+      row.querySelector('input').placeholder = have[k] ? 'paste a new one to replace it' : 'paste your key';
+      row.querySelector('input').dataset.key = k; form.appendChild(row);
+    }
+    msg.textContent = ''; panel.hidden = false;
+  }
+  $('#t-keys').addEventListener('click', () => { const p = $('#keys-panel'); if (p.hidden) openKeys(); else p.hidden = true; });
+  $('#keys-close').addEventListener('click', () => { $('#keys-panel').hidden = true; });
+  $('#keys-save').addEventListener('click', async () => {
+    const keys = {}; for (const i of $('#keys-form').querySelectorAll('input')) if (i.value.trim()) keys[i.dataset.key] = i.value.trim();
+    const msg = $('#keys-msg');
+    if (!Object.keys(keys).length) { msg.textContent = 'Nothing new to save.'; return; }
+    try {
+      const r = await handsFetch('/keys', { keys });
+      for (const i of $('#keys-form').querySelectorAll('input')) i.value = '';                  // don't keep keys on screen
+      msg.textContent = r.saved.length ? `Saved ${r.saved.length}. Restarting the model router…` : 'Those didn\'t look like keys (no spaces, at least 8 characters).';
+      if (r.saved.length) { chime(660, 990); setTimeout(() => { $('#keys-panel').hidden = true; say(`Keys saved. Give me about thirty seconds to restart, then say status.`); }, 1500); }
+    } catch (e) { msg.textContent = e.message; }
+  });
+
   // routines run on their own while Hands is on; tell Mark when one finishes
   let primed = false;                                   // the first check only notes runs that finished before
   setInterval(async () => {
@@ -694,6 +732,7 @@
             if (d.action === 'assistant') { S.assistantLabel = d.label; applyAssistant(d.name); if (d.active) { S.active = d.active; render(); } chime(d.name === 'sophia' ? 740 : 520, d.name === 'sophia' ? 1110 : 780); }
             if (d.action === 'agent') queuedAgent = d;
             if (d.action === 'brain') queuedBrain = d;
+            if (d.action === 'keys') openKeys();
           } else if (d.type === 'council') {
             d.members.forEach((id, k) => setTimeout(() => beams.push({ from: S.active, to: id, life: 1.6 }), k * 150));
           } else if (d.type === 'done') {

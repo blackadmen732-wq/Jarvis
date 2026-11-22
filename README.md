@@ -57,6 +57,19 @@ You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) insta
 
 **Check it works:** click the model dropdown at the top. You should see a long list of models. Pick one ending in `:free` and say hi.
 
+### Add your API keys without the terminal
+
+Press **Keys** at the bottom of the HUD (or say *"open my keys"*). Paste each key into its box and press **Save keys**. Jarvis Hands writes them into `.env` on your computer and restarts the model router, so they work about 30 seconds later. Each box has a **get a key ↗** link:
+
+| Key | Where | Cost |
+|---|---|---|
+| Groq | console.groq.com/keys | free |
+| OpenRouter | openrouter.ai/keys | free models free; Grok and Claude need credit |
+| Gemini | aistudio.google.com/apikey | free, about 20 a day |
+| NVIDIA | build.nvidia.com → API Keys | free |
+
+Keys stay on your computer: they're never shown again in the HUD, never synced to Supabase and never sent to Claude or GitHub. (Needs Jarvis Hands, which the Jarvis app icon starts for you.)
+
 ### Make Jarvis an app (no terminal after this)
 
 Run this **once**:

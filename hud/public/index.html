@@ -92,6 +92,7 @@
       <button class="toggle on" id="t-color" type="button" title="Change the colour theme">● Amber</button>
       <button class="toggle" id="t-play" type="button" aria-pressed="false" title="Play with the black hole: throw light, gas, stars and planets">✦ Play</button>
       <button class="toggle on" id="t-holo" type="button" aria-pressed="true" title="Holographic machine rings, drones and radar">Holo</button>
+      <button class="toggle" id="t-keys" type="button" title="Add your API keys (saved on this computer only)">Keys</button>
     </div>
     <form class="dock-input" id="form" autocomplete="off">
       <button class="mic" id="mic" type="button" aria-label="Talk to Jarvis"><span></span></button>
@@ -122,6 +123,13 @@
       <label class="pb-label pb-dens" title="How much glowing matter the disk holds">Plasma <input type="range" id="pb-density" min="0.4" max="2.6" step="0.05"></label>
     </div>
     <div class="pb-stats"><span id="pb-hint">Pick something, then click in space · drag to turn</span><span id="pb-stats">MASS 1.00</span></div>
+  </div>
+
+  <div class="keys-panel panel-pop" id="keys-panel" hidden>
+    <div class="panel-head"><span>API keys</span><button class="ghost" id="keys-close" type="button">Close</button></div>
+    <p class="kp-note">Saved only on this computer (Jarvis's <b>.env</b>), never sent to Claude, GitHub or Supabase. Leave a box empty to keep the key you have.</p>
+    <form id="keys-form" autocomplete="off"></form>
+    <div class="kp-foot"><span id="keys-msg"></span><button class="toggle on" id="keys-save" type="button">Save keys</button></div>
   </div>
 
   <div class="voice-panel panel-pop" id="voice-panel" hidden>
