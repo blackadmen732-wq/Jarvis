@@ -58,7 +58,9 @@
         "quick",
         "chat",
         "code"
-      ]
+      ],
+      "paid": true,
+      "note": "Cerebras ended its free tier on Jul 21 2026 (now a $5 trial with a card). Only used when you pick it."
     },
     {
       "id": "kimi",
@@ -176,6 +178,63 @@
       "note": "free, Google, mixture of experts: big-model quality at small-model speed"
     },
     {
+      "id": "particle",
+      "label": "Particle-1",
+      "group": "OpenRouter",
+      "model": "open_router/particle-ai/particle-1:free",
+      "aliases": [
+        "particle",
+        "particle one"
+      ],
+      "jobs": [
+        "code",
+        "reason"
+      ],
+      "note": "free, built for coding agents, 1M context"
+    },
+    {
+      "id": "nemotron-or",
+      "label": "Nemotron Ultra (OpenRouter)",
+      "group": "OpenRouter",
+      "model": "open_router/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "aliases": [
+        "nemotron openrouter"
+      ],
+      "jobs": [
+        "reason",
+        "long"
+      ],
+      "note": "free on OpenRouter too, the biggest free reasoning model"
+    },
+    {
+      "id": "lightning-or",
+      "label": "Nemotron Lightning (OpenRouter)",
+      "group": "OpenRouter",
+      "model": "open_router/nvidia/nemotron-3.5-lightning:free",
+      "aliases": [
+        "lightning openrouter"
+      ],
+      "jobs": [
+        "quick",
+        "chat"
+      ],
+      "note": "free, fast"
+    },
+    {
+      "id": "ling",
+      "label": "Ling 3.2 Flash",
+      "group": "OpenRouter",
+      "model": "open_router/inclusionai/ling-3.2-flash:free",
+      "aliases": [
+        "ling"
+      ],
+      "jobs": [
+        "chat",
+        "long"
+      ],
+      "note": "free, 1M context, reads images"
+    },
+    {
       "id": "gemini",
       "label": "Gemini Flash",
       "group": "Google",
@@ -185,10 +244,9 @@
         "google"
       ],
       "jobs": [
-        "quick",
-        "chat",
         "long"
-      ]
+      ],
+      "note": "free tier is small (about 20 requests a day): kept for long documents"
     },
     {
       "id": "grok",
@@ -316,5 +374,24 @@
         "quick"
       ]
     }
-  ]
+  ],
+  "daily_limits": {
+    "_help": "free requests a day per provider; the Auto Router stops using a provider before it runs out. OpenRouter: 50 (1000 after a one-time $10 credit).",
+    "open_router": 50,
+    "groq": 1000,
+    "gemini": 20,
+    "nvidia_nim": 1000
+  },
+  "fallbacks": [
+    "groq",
+    "lightning",
+    "free",
+    "gemma26"
+  ],
+  "tts": {
+    "_help": "free natural voices through OpenRouter (Fish Audio). Each spoken reply uses one OpenRouter request.",
+    "model": "fish-audio/s2.1-pro-free:free",
+    "jarvis": "Speak as Jarvis: a calm, witty, confident British man in his thirties, warm low voice, natural pace.",
+    "sophia": "Speak as Sophia: a warm, playful, confident young woman, bright expressive voice, natural pace, a little teasing."
+  }
 }

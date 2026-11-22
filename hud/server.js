@@ -137,7 +137,25 @@ const byId = id => allModels().find(m => m.id === id);
 
 // Who takes over when a model fails: your local model if it's downloaded, otherwise the first free cloud model that
 // hasn't just failed (a Chromebook usually has no local model, and a fallback that isn't there is no fallback).
-const CLOUD_FALLBACKS = ['groq', 'cerebras', 'lightning', 'free', 'gemini'];
+const CLOUD_FALLBACKS = ['groq', 'lightning', 'free', 'gemma26'];
+
+// Daily free budgets per provider (models.json "daily_limits"): OpenRouter's free models share 50 a day, Gemini ~20,
+// Groq 1,000. Every request (chat, race, voice) is counted here, and the router stops using a provider before it
+// runs out. Counts reset at midnight and survive restarts (DATA_DIR/usage.json).
+const USAGE_PATH = path.join(DATA_DIR, 'usage.json');
+const today = () => new Date().toISOString().slice(0, 10);
+let usage = readJSON(USAGE_PATH, { day: today(), counts: {} });
+const providerOf = model => String(model || '').split('/')[0];
+function noteUse(model) {
+  if (usage.day !== today()) usage = { day: today(), counts: {} };
+  const p = providerOf(model); usage.counts[p] = (usage.counts[p] || 0) + 1;
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(USAGE_PATH, JSON.stringify(usage)); } catch {}
+}
+function budgetLeft(model) {
+  if (usage.day !== today()) usage = { day: today(), counts: {} };
+  const lim = (config.daily_limits || {})[providerOf(model)];
+  return typeof lim === 'number' ? lim - (usage.counts[providerOf(model)] || 0) : Infinity;
+}
 
 // ---------------------------------------------------------------- Auto Router (Mark, Nov 22)
 // Like the Rocket Team experts: for each request, work out the JOB, rank the free models that are good at it by how
@@ -165,13 +183,15 @@ function notePerf(id, ttft, failed, lost = false) {
 function rankFor(job, exclude = []) {
   const recentFail = m => m.status && m.status.state === 'error' && Date.now() - (m.status.at || 0) < 3 * 60e3;
   return allModels()
-    .filter(m => m.id !== 'auto' && m.installed && !exclude.includes(m.id) && (config.allow_paid || !m.paid) && !recentFail(m))
+    .filter(m => m.id !== 'auto' && m.installed && !exclude.includes(m.id) && (config.allow_paid || !m.paid) && !recentFail(m) && budgetLeft(m.model) > 0)
     .map(m => {
       const jobs = m.jobs || ['chat'];
       const fit = jobs.includes(job) ? 3 : jobs.includes('chat') && job !== 'code' ? 1 : 0;
       const p = perf[m.id] || {}, ttft = p.ttft ?? (m.local ? 4000 : 1500);
       const reliability = p.ok || p.fails ? p.ok / (p.ok + p.fails) : 0.8;
-      return { m, score: fit * 2 + reliability * 2 - Math.min(ttft, 20000) / 2500 };
+      const left = budgetLeft(m.model), lim = (config.daily_limits || {})[providerOf(m.model)];
+      const scarce = lim ? Math.max(0, 1 - left / lim) : 0;               // nearly used up today -> save it for when it matters
+      return { m, score: fit * 2 + reliability * 2 - Math.min(ttft, 20000) / 2500 - scarce * 2 };
     })
     .filter(x => x.score > -5).sort((a, b) => b.score - a.score).map(x => x.m);
 }
@@ -227,10 +247,10 @@ async function autoSpeak(send, message, system, messages, role) {
 function bestFallback(activeId) {
   const recentFail = m => m.status && m.status.state === 'error' && Date.now() - (m.status.at || 0) < 5 * 60e3;
   const local = byId(config.fallback);
-  if (local && local.id !== activeId && local.id !== 'auto' && (!local.local || local.installed) && !recentFail(local)) return local;
+  if (local && local.id !== activeId && local.id !== 'auto' && (!local.local || local.installed) && !recentFail(local) && budgetLeft(local.model) > 0) return local;
   for (const id of config.fallbacks || CLOUD_FALLBACKS) {
     const m = byId(id);
-    if (m && m.id !== activeId && !m.paid && m.installed && !recentFail(m)) return m;
+    if (m && m.id !== activeId && !m.paid && m.installed && !recentFail(m) && budgetLeft(m.model) > 0) return m;
   }
   return null;
 }
@@ -367,6 +387,7 @@ function parseCommand(text) {
 const VOICE_RULES = 'Your words are spoken aloud by a voice. Plain sentences only: no markdown, lists, code blocks, tables or emojis. Keep it under 80 words unless Mark asks for detail.';
 
 async function* streamModel(entry, system, messages, maxTokens = 700, cancel = null) {
+  noteUse(entry.model);
   const res = await fetch(ROUTER + '/v1/messages', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', authorization: 'Bearer ' + ROUTER_TOKEN },
@@ -528,7 +549,7 @@ async function handleChat(body, send) {
   if (cmd && cmd.action === 'status') {
     const a = byId(state.active);
     const okCount = allModels().filter(m => m.status.state === 'ok').length;
-    return say(`${me()} here, running on ${a ? a.label : 'nothing'}, ${state.personality === 'grok' ? 'Grok' : 'serious'} personality. Router ${routerOnline ? 'online' : 'offline'}, local engine ${localOnline ? 'online with ' + localModels.length + ' models' : 'offline'}. ${okCount} links confirmed working. Council mode is ${state.councilMode ? 'on' : 'off'}.`);
+    return say(`${me()} here, running on ${a ? a.label : 'nothing'}, ${state.personality === 'grok' ? 'Grok' : 'serious'} personality. Router ${routerOnline ? 'online' : 'offline'}, local engine ${localOnline ? 'online with ' + localModels.length + ' models' : 'offline'}. ${okCount} links confirmed working. Council mode is ${state.councilMode ? 'on' : 'off'}.${Object.entries(config.daily_limits || {}).filter(([k, v]) => typeof v === 'number' && usage.counts[k]).map(([k, v]) => ` ${k.replace('_', ' ')}: ${usage.counts[k]} of ${v} free requests used today.`).join('')}`);
   }
   if (cmd && cmd.action === 'lina') return linaRule(cmd.text, send, say);
   if (cmd && cmd.action === 'lina_confirm') {
@@ -731,8 +752,31 @@ async function edgebotReport() {
 // ---------------------------------------------------------------- studio voices (Kokoro)
 const ACCENTS = { a: 'American', b: 'British', e: 'Spanish', f: 'French', h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin' };
 let voiceCache = { at: 0, list: [] };
+// Free natural cloud voices through OpenRouter (Fish Audio), described in words per assistant (models.json "tts").
+// Offered only when an OpenRouter key is set; each spoken reply is one OpenRouter request (counted in the budget).
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || '';
+const OPENROUTER_URL = (process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+const CLOUD_VOICES = [
+  { id: 'fish_jarvis', name: 'Jarvis (Fish Audio, cloud)', accent: 'British', gender: 'male', grade: 'cloud', cloud: true },
+  { id: 'fish_sophia', name: 'Sophia (Fish Audio, cloud)', accent: 'American', gender: 'female', grade: 'cloud', cloud: true },
+];
+async function cloudSpeech(voice, text, speed, res) {
+  const tts = config.tts || {}, model = tts.model || 'fish-audio/s2.1-pro-free:free';
+  if (!OPENROUTER_KEY) return json(res, 503, { error: 'cloud voices need OPENROUTER_API_KEY in .env' });
+  if (budgetLeft('open_router/x') <= 0) return json(res, 429, { error: "today's free OpenRouter requests are used up" });
+  noteUse('open_router/' + model);
+  const r = await fetch(OPENROUTER_URL + '/audio/speech', {
+    method: 'POST', signal: AbortSignal.timeout(60e3),
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + OPENROUTER_KEY, 'x-title': 'Jarvis OS' },
+    body: JSON.stringify({ model, input: text, response_format: 'mp3', speed, instructions: tts[voice.replace(/^fish_/, '')] || undefined }),
+  });
+  if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); m = (j.error && j.error.message) || m; } catch {} throw new Error(m); }
+  const buf = Buffer.from(await r.arrayBuffer());
+  res.writeHead(200, { 'content-type': 'audio/mpeg', 'cache-control': 'no-store', 'content-length': buf.length }); res.end(buf);
+}
+
 async function studioVoices() {
-  if (Date.now() - voiceCache.at < 60e3 && voiceCache.list.length) return { online: true, voices: voiceCache.list };
+  if (Date.now() - voiceCache.at < 60e3 && voiceCache.list.length) return { online: true, voices: OPENROUTER_KEY ? [...voiceCache.list, ...CLOUD_VOICES] : voiceCache.list };
   try {
     const r = await fetch(KOKORO + '/v1/audio/voices', { signal: AbortSignal.timeout(4000) });
     const j = await r.json();
@@ -743,14 +787,17 @@ async function studioVoices() {
       accent: ACCENTS[v.id[0]] || v.id[0], gender: v.id[1] === 'f' ? 'female' : 'male', grade: v.grade || '',
     })).sort((x, y) => rank(x.grade) - rank(y.grade) || x.id.localeCompare(y.id));
     voiceCache = { at: Date.now(), list };
-    return { online: true, voices: list };
-  } catch { return { online: false, voices: [] }; }
+    return { online: true, voices: OPENROUTER_KEY ? [...list, ...CLOUD_VOICES] : list };
+  } catch { return OPENROUTER_KEY ? { online: true, voices: CLOUD_VOICES } : { online: false, voices: [] }; }
 }
 async function studioSpeech(body, res) {
   const text = String(body.text || '').slice(0, 1200).trim();
   const voice = String(body.voice || 'bm_george').replace(/[^a-z0-9_+()., ]/gi, '').slice(0, 80);
   const speed = Math.min(1.6, Math.max(0.6, Number(body.speed) || 1));
   if (!text) { res.writeHead(400); return res.end(); }
+  if (/^fish_(jarvis|sophia)$/.test(voice)) {
+    try { return await cloudSpeech(voice, text, speed, res); } catch (e) { return json(res, 502, { error: 'cloud voice failed: ' + e.message }); }
+  }
   try {
     const r = await fetch(KOKORO + '/v1/audio/speech', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -783,6 +830,7 @@ function json(res, code, obj) {
 }
 function publicState() {
   return {
+    usage: { day: usage.day, counts: usage.counts, limits: config.daily_limits || {} },
     active: state.active, councilMode: state.councilMode, personality: state.personality, assistant: state.assistant, assistantLabel: me(), council: state.council, fallback: config.fallback,
     router: { online: routerOnline, url: ROUTER }, local: { online: localOnline, models: localModels }, sync: sync.status,
     models: allModels(),

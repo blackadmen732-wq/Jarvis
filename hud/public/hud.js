@@ -725,8 +725,10 @@
   let assistant = store.get('assistant', 'jarvis');
   function saveVoiceFor() { store.set('voice.' + assistant, { engine, studioVoice, voiceName }); }
   function defaultVoiceFor(name) {
-    if (name !== 'sophia') return { engine: studio.online ? 'studio' : 'browser', studioVoice: 'bm_george', voiceName: null };
-    const sv = studio.online ? (studio.voices.find(v => v.id === 'af_heart') || studio.voices.find(v => v.gender === 'female')) : null;
+    // default to voices that cost nothing: Kokoro (if running) or the browser's own; cloud voices only when Mark picks them
+    const local = studio.online ? studio.voices.filter(v => !v.cloud) : [];
+    if (name !== 'sophia') { const g = local.find(v => v.id === 'bm_george') || local.find(v => v.gender === 'male'); return { engine: g ? 'studio' : 'browser', studioVoice: g ? g.id : 'bm_george', voiceName: null }; }
+    const sv = local.find(v => v.id === 'af_heart') || local.find(v => v.gender === 'female');
     const sys = synth ? synth.getVoices().find(v => kindOf(v) === 'female' && /^en/i.test(v.lang)) : null;
     return { engine: sv ? 'studio' : 'browser', studioVoice: sv ? sv.id : 'af_heart', voiceName: sys ? sys.name : null };
   }
@@ -766,7 +768,8 @@
     if (engine !== 'studio' && !synth) return;
     const parts = plain(text).match(/[^.!?]+[.!?]*\s*/g) || [];
     let chunk = '';
-    for (const p of parts) { if ((chunk + p).length > 220) { speechQueue.push(chunk); chunk = ''; } chunk += p; }
+    const limit = engine === 'studio' && /^fish_/.test(studioVoice) ? 1200 : 220;   // cloud voices: one request per reply (daily limit)
+    for (const p of parts) { if ((chunk + p).length > limit) { speechQueue.push(chunk); chunk = ''; } chunk += p; }
     if (chunk.trim()) speechQueue.push(chunk);
     // studio voices: start generating audio for every chunk right away so playback is gapless
     if (engine === 'studio') speechQueue = speechQueue.map(c => typeof c === 'string' ? { text: c, audio: studioFetch(c).catch(() => null) } : c);

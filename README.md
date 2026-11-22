@@ -344,6 +344,10 @@ Jarvis doesn't make you pick a model. The **Auto Router** looks at each request,
 - Say *"switch to Groq"* (or any model) to pick one yourself; *"switch to auto router"* to go back.
 - Free models it uses (each needs its provider's key in `.env`): GPT-OSS on Groq, Qwen on Cerebras, Nemotron and Kimi on NVIDIA, Gemini Flash, and on OpenRouter: **ERNIE 5.5 Flash** (reads up to 1 million tokens: long documents), **Gemma 4 31B** and **Gemma 4 26B Fast**, plus OpenRouter's free picker. Edit the `jobs` of any model in `hud/models.json` to change what it's used for. Paid models (Grok, Claude) are only used when you pick them, or with `"allow_paid": true`.
 
+**Free limits (checked Nov 22, 2026)**, which the router respects (`daily_limits` in `hud/models.json`): OpenRouter's free models share **50 requests a day** (1,000 a day forever after a one-time $10 credit; then set `"open_router": 1000`), Groq about 1,000 a day, Gemini about 20 a day (so it's only used for long documents), NVIDIA about 40 a minute. **Cerebras is no longer free** (since July 2026), so the router only uses it if you pick it. Jarvis counts every request, saves the best providers for when they matter, and stops using one before it runs out. Say *"status"* to hear today's counts.
+
+**Cloud voices (optional):** with an OpenRouter key, the Voice Studio also offers **Jarvis** and **Sophia** voices from Fish Audio's free model, described in words in `hud/models.json` (`"tts"`). They sound natural and need nothing installed, which suits a Chromebook, but each spoken reply uses one of OpenRouter's daily free requests. Chrome's own voices stay free and unlimited, and they're the default.
+
 ### Sophia and Jarvis: two assistants
 
 Jarvis has a partner: **Sophia**. Same Grok-style personality ([`jarvis/sophia-persona.md`](jarvis/sophia-persona.md)), her own female voice, and her own model.
