@@ -101,6 +101,7 @@ export function createHolo(scene, glow, { mobile = false } = {}) {
     machine.rotation.y += dt * 0.03;
     sweep.rotation.z -= dt * 0.9 * busy; sweepMat.uniforms.uVis.value = vis * (f.floorVis ?? 1); sweep.visible = (f.floorVis ?? 1) > 0.05;   // radar only with a floor
     for (const d of drones) {
+      if (d.taken) continue;
       const a = d.phase + t * d.speed;
       d.g.position.set(Math.cos(a) * d.r, Math.sin(a * 2.0) * 0.4 + Math.sin(d.inc) * Math.sin(a) * d.r * 0.35 + 0.6, Math.sin(a) * d.r);
       d.wire.rotation.x += dt * 0.6; d.wire.rotation.y += dt * 0.9; d.inner.rotation.y -= dt * 2;
@@ -121,5 +122,9 @@ export function createHolo(scene, glow, { mobile = false } = {}) {
       d.beamMat.opacity = 0;   // scan beams removed: they cut across the view
     }
   }
-  return { update, setTheme, root };
+  // drones can be grabbed and thrown into the black hole; a replacement flies in after a few seconds
+  function grabbables() { return root.visible ? drones.filter(d => !d.taken).map(d => d.g) : []; }
+  function take(g) { const d = drones.find(x => x.g === g); if (d) d.taken = true; return d; }
+  function giveBack(g) { const d = drones.find(x => x.g === g); if (!d) return; setTimeout(() => { root.add(g); g.scale.setScalar(1); d.taken = false; }, 6000); }
+  return { update, setTheme, root, grabbables, take, giveBack };
 }

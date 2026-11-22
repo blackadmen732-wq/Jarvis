@@ -135,6 +135,14 @@ function parseCommand(text) {
     const k = m[1];
     return { action: 'scene', scene: /auto|adaptive/.test(k) ? 'auto' : /circuit/.test(k) ? 'circuit' : /pulse|spike/.test(k) ? 'pulse' : /plasma/.test(k) ? 'plasma' : /portal|warp|vortex/.test(k) ? 'portal' : /liquid|glass/.test(k) ? 'liquid' : /bloom|flower/.test(k) ? 'bloom' : /black ?hole|singularity/.test(k) ? 'blackhole' : /sun|star|solar/.test(k) ? 'sun' : /brain|neural/.test(k) ? 'brain' : /stream|flow/.test(k) ? 'stream' : 'reactor' };
   }
+  // laptop control: "take control of my laptop (and open firefox)", "stop" / "release control"
+  if ((m = t.match(/^(?:please |can you |i want you to )?(?:take|get|grab|have) (?:full )?(?:control|over)(?: of| over)?(?: my| the)?(?: laptop| computer| pc| desktop| screen| machine| mouse)?(?:(?:,| and| then| to)\s+(.+))?$/)))
+    return { action: 'control', on: true, task: m[1] || '' };
+  if (/^(?:stop|release|cancel|end|drop|quit|exit)(?: the)?(?: laptop)? control|^give (?:me )?(?:back )?(?:the )?control|^hands off|^stop(?: it| now| that| everything)?$/.test(t)) return { action: 'control', on: false };
+  // black hole play: "throw a star in", "send light", "feed it gas", "clear the black hole"
+  if ((m = t.match(/^(?:throw|send|drop|shoot|fire|feed(?: it| the black hole)?|launch|add)(?: in| into)?(?: a| an| some| the| more)? (light|laser|photons?|beams?|gas|matter|cloud|stars?|planets?|rocks?|asteroids?)\b/)))
+    return { action: 'play', what: /light|laser|photon|beam/.test(m[1]) ? 'light' : /gas|matter|cloud/.test(m[1]) ? 'gas' : /star/.test(m[1]) ? 'star' : 'planet' };
+  if (/^(clear|reset|clean)( the| my)? (black hole|play|space)$/.test(t)) return { action: 'play', what: 'clear' };
   if ((m = t.match(/^(?:change|switch|set|make|turn)(?: the| your| my)? (?:colou?rs?|theme)(?: to| into)? (\w+)$/)) || (m = t.match(/^(?:go |use |make it )?(\w+) (?:colou?rs?|theme)$/))) {
     const c = m[1];
     const theme = /blue|ice|cyan|sky/.test(c) ? 'ice' : /purple|violet|lilac|magenta/.test(c) ? 'violet' : /red|crimson/.test(c) ? 'crimson' : /green|emerald|mint/.test(c) ? 'emerald' : /gold|yellow/.test(c) ? 'gold' : /orange|amber|default|normal|original/.test(c) ? 'amber' : null;
@@ -244,6 +252,18 @@ function cleanHistory(history) {
   return out;
 }
 
+// quick direct actions while Jarvis has the laptop: no vision model needed
+function directAction(msg) {
+  const t = norm(msg); let m;
+  if ((m = t.match(/^scroll (up|down|left|right)(?: (\d+|a lot|a little|more))?$/))) return { action: 'scroll', direction: m[1], amount: m[2] === 'a lot' ? 12 : m[2] === 'a little' ? 2 : +m[2] || 5 };
+  if ((m = String(msg).match(/^\s*type\s+(.+?)\s*$/i))) return { action: 'type', text: m[1] };
+  if ((m = t.match(/^(?:press|hit) (.+)$/))) return { action: 'key', keys: m[1].replace(/ (?:plus|and) /g, '+').replace(/\s+/g, '+') };
+  if (/^(?:left )?click(?: here| it)?$/.test(t)) return { action: 'click_here' };
+  if (/^double click(?: here| it)?$/.test(t)) return { action: 'double_click_here' };
+  if (/^right click(?: here| it)?$/.test(t)) return { action: 'right_click_here' };
+  return null;
+}
+
 async function handleChat(body, send) {
   const message = String(body.message || '').trim().slice(0, 4000);
   if (!message) return send({ type: 'done' });
@@ -261,6 +281,22 @@ async function handleChat(body, send) {
   if (cmd && cmd.action === 'theme') { send({ type: 'command', action: 'theme', theme: cmd.theme }); return; }
   if (cmd && cmd.action === 'scene') { send({ type: 'command', action: 'scene', scene: cmd.scene }); return; }
   if (cmd && cmd.action === 'holo') { send({ type: 'command', action: 'holo', on: cmd.on }); return; }
+  if (cmd && cmd.action === 'control') {
+    state.controlMode = cmd.on;
+    send({ type: 'command', action: 'control', on: cmd.on, task: cmd.task || '' });
+    return say(!cmd.on ? 'Control released. Your laptop is all yours.'
+      : cmd.task ? 'Taking control of your laptop. On it.'
+      : 'I have your laptop. Tell me what to do. Say stop, press Escape, or push the mouse into the top left corner to take it back.');
+  }
+  if (!cmd && state.controlMode) {             // while in control, everything you say is an order for the laptop
+    const direct = directAction(message);
+    send({ type: 'command', action: 'control', on: true, task: direct ? '' : message, direct });
+    return say(direct ? 'Done.' : 'On it.');
+  }
+  if (cmd && cmd.action === 'play') {
+    send({ type: 'command', action: 'play', what: cmd.what });
+    return say(cmd.what === 'clear' ? 'Space cleared.' : ({ light: 'Firing a beam of light past the event horizon.', gas: 'Releasing a gas cloud. Watch it spiral in and heat up.', star: 'Sending a star in. The tides will tear it apart.', planet: 'Dropping a planet. It will not survive.' })[cmd.what]);
+  }
   if (cmd && cmd.action === 'voice') {
     send({ type: 'command', action: 'voice', query: cmd.query });   // the browser knows which voices exist
     return;

@@ -88,6 +88,7 @@
       <button class="toggle on" id="t-fx" type="button" aria-pressed="true" title="Interface sounds">FX</button>
       <button class="toggle" id="t-scene" type="button" title="Change the core / scene (Black Hole, Sun, Reactor, Neural Brain, Data Stream)">◐ Auto</button>
       <button class="toggle on" id="t-color" type="button" title="Change the colour theme">● Amber</button>
+      <button class="toggle" id="t-play" type="button" aria-pressed="false" title="Play with the black hole: throw light, gas, stars and planets">✦ Play</button>
       <button class="toggle on" id="t-holo" type="button" aria-pressed="true" title="Holographic machine rings, drones and radar">Holo</button>
     </div>
     <form class="dock-input" id="form" autocomplete="off">
@@ -96,6 +97,28 @@
       <button class="send" type="submit" aria-label="Send">➤</button>
     </form>
   </footer>
+
+  <div class="ctrl-banner" id="ctrl-banner" hidden role="status">
+    <span class="ctrl-dot"></span><b>CONTROL ACTIVE</b><span id="ctrl-step">READY</span><span id="ctrl-thought">Waiting for your order</span>
+    <button type="button" class="ghost" id="ctrl-stop" title="Take your laptop back (Esc, or push the mouse into the top-left corner)">Stop · Esc</button>
+  </div>
+  <div class="play-bar" id="play-bar" hidden>
+    <div class="pb-tools" role="group" aria-label="What to throw">
+      <button type="button" class="toggle" data-tool="light" title="A beam of light: watch it bend, loop and fall in">✦ Light</button>
+      <button type="button" class="toggle" data-tool="gas" title="A gas cloud: it spirals in, heats up and feeds the disk">☁ Gas</button>
+      <button type="button" class="toggle" data-tool="star" title="A star: tides stretch it into a stream">★ Star</button>
+      <button type="button" class="toggle" data-tool="planet" title="A planet: it heats up and breaks apart">● Planet</button>
+      <button type="button" class="ghost" id="pb-clear" title="Remove everything and reset the hole">Clear</button>
+    </div>
+    <div class="pb-row">
+      <span class="pb-label">View</span>
+      <button type="button" class="toggle" data-view="wide" title="Pull back and see everything">Wide</button>
+      <button type="button" class="toggle" data-view="close" title="Fly in close to the disk">Close</button>
+      <button type="button" class="toggle" data-view="follow" title="Ride along with the last thing you threw">Follow</button>
+      <label class="pb-label pb-dens" title="How much glowing matter the disk holds">Plasma <input type="range" id="pb-density" min="0.4" max="2.6" step="0.05"></label>
+    </div>
+    <div class="pb-stats"><span id="pb-hint">Pick something, then click in space · drag to turn</span><span id="pb-stats">MASS 1.00</span></div>
+  </div>
 
   <div class="voice-panel panel-pop" id="voice-panel" hidden>
     <div class="panel-head"><span>Voice Studio</span><button class="ghost" id="voice-close" type="button">Close</button></div>

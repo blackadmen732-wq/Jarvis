@@ -173,7 +173,8 @@ export function createScenes(scene, { glow, mobile = false, reduce = false, pixe
     // Auto: the core changes with what Jarvis is doing
     if (current === 'auto') {
       const home = SCENES[f.home] && f.home !== 'auto' ? f.home : 'blackhole';
-      current = f.uiState === 'listening' ? 'pulse' : f.uiState === 'thinking' ? 'portal'
+      // while playing with the black hole (or Jarvis is driving the laptop) the core stays put
+      current = f.playOpen ? 'blackhole' : f.uiState === 'listening' ? 'pulse' : f.uiState === 'thinking' ? 'portal'
         : f.uiState === 'speaking' ? (f.councilMode ? 'liquid' : 'plasma') : home;
     }
     const k = started ? Math.min(1, dt * 1.8) : 1; started = true;   // no fade on first load

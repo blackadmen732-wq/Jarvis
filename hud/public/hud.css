@@ -309,3 +309,28 @@ body.booting .readout { opacity: 0; } body.booted .readout { animation: in .8s e
 /* the newly linked row in Neural Links flashes once */
 .link.active { animation: linkflash 1.2s ease-out 1; }
 @keyframes linkflash { 0% { background: rgba(255,211,138,.35); } 100% { background: rgba(255,168,58,.1); } }
+
+/* black hole play bar */
+#t-play { display: none; }
+body.bh-mode #t-play, body[data-scene="auto"] #t-play, body[data-scene="blackhole"] #t-play { display: inline-flex; }
+.play-bar { position: fixed; z-index: 8; left: 50%; bottom: 120px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; background: rgba(8, 12, 20, 0.72); border: 1px solid rgba(255, 168, 58, 0.35); backdrop-filter: blur(8px); }
+.play-bar[hidden] { display: none; }
+.pb-tools { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.pb-stats { display: flex; justify-content: space-between; gap: 18px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim, #7f8da3); }
+#pb-stats { color: var(--amber, #ffa83a); }
+@media (max-width: 760px) { .play-bar { bottom: 170px; width: calc(100% - 24px); } }
+.pb-row { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.pb-label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim, #7f8da3); }
+.pb-dens { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
+.pb-dens input { width: 110px; accent-color: var(--amber, #ffa83a); }
+
+/* laptop control banner */
+.ctrl-banner { position: fixed; z-index: 9; top: 78px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px;
+  max-width: min(760px, calc(100% - 24px)); padding: 7px 12px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  background: rgba(40, 6, 6, 0.82); border: 1px solid rgba(255, 74, 60, 0.7); color: #ffd2c8; box-shadow: 0 0 24px rgba(255, 60, 40, 0.35); }
+.ctrl-banner[hidden] { display: none; }
+.ctrl-banner b { color: #ff6b5a; letter-spacing: 0.2em; }
+#ctrl-thought { text-transform: none; letter-spacing: 0.02em; opacity: 0.9; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+.ctrl-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff4a3c; box-shadow: 0 0 10px #ff4a3c; animation: ctrlblink 1s infinite; flex: none; }
+@keyframes ctrlblink { 50% { opacity: 0.25; } }
