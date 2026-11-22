@@ -5,3 +5,7 @@ jarvis/config.json
 
 # Jarvis HUD local state
 hud/data/
+
+# Python caches
+__pycache__/
+*.pyc
