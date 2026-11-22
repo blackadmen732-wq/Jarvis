@@ -38,16 +38,23 @@ const BH_FRAG = /* glsl */`
     float ph = fract(uTime / PERIOD), w = abs(ph * 2.0 - 1.0);
     float n = mix(gas(ang, r, ph * PERIOD), gas(ang + 2.1, r * 1.03, fract(ph + 0.5) * PERIOD), w);
     float clumps = 0.16 + 1.45 * pow(n, 1.25);
-    float prof = pow(RIN / r, 1.25) * smoothstep(RIN, RIN * 1.12, r);   // bright inner edge, long glowing tail
+    // Thin-disk physics (Shakura-Sunyaev profile, relativistic Doppler factor, Schwarzschild redshift), adapted from
+    // Adriwin06/black-hole (MIT; (c) 2015 Otto Seiskari, (c) 2026 Adriwin). Theme colours stand in for blackbody colour.
+    float xr = max(r / RIN, 1.0001), inner = max(1.0 - sqrt(1.0 / xr), 0.0);
+    float flux = inner / (xr * xr * xr) / 0.0568;                       // 1.0 at the brightest ring (r = 49/36 RIN)
+    float temp = 2.049 * pow(1.0 / xr, 0.75) * pow(max(inner, 0.02), 0.25);   // 1.0 at that ring, cooler outward
+    float prof = pow(flux, 0.45) * smoothstep(RIN, RIN * 1.04, r);      // dark gap at the inner edge, long glowing tail
     float edgeOut = 1.0 - smoothstep(ROUT * 0.45, ROUT, r);
-    float x = clamp((r - RIN) / (ROUT * 0.55), 0.0, 1.0);
-    vec3 col = x < 0.22 ? mix(uHot, uMid, x / 0.22) : mix(uMid, uDeep, clamp((x - 0.22) / 0.7, 0.0, 1.0));
-    col = mix(col, vec3(1.0), 0.35 * uFeed * exp(-(r - RIN) / 2.0));     // fresh matter makes the inner disk white-hot
-    // relativistic beaming: the side rushing toward us is brighter
+    // orbital speed seen from outside (Rs = 1): v = sqrt(0.5 / (r - 1)); g = 1 / (gamma (1 - v cos))
     vec3 vdisk = normalize(vec3(-p.z, 0.0, p.x));
-    float beta = clamp(sqrt(0.5 / r), 0.0, 0.6);
-    float beam = clamp(pow(1.0 + beta * 1.6 * dot(vdisk, -normalize(dir)), 2.5), 0.15, 3.0);
-    float grav = sqrt(clamp(1.0 - 1.0 / r, 0.05, 1.0));
+    float beta = clamp(sqrt(0.5 / max(r - 1.0, 0.2)), 0.0, 0.72);
+    float gam = 1.0 / sqrt(1.0 - beta * beta);
+    float g = 1.0 / (gam * (1.0 - beta * dot(vdisk, -normalize(dir))));
+    float grav = sqrt(clamp(1.0 - 1.0 / r, 0.05, 1.0));                  // light climbing out of the hole loses energy
+    float tObs = temp * g * grav;                                        // the colour we see: hotter on the approaching side
+    vec3 col = tObs > 0.55 ? mix(uMid, uHot, clamp((tObs - 0.55) / 0.45, 0.0, 1.0)) : mix(uDeep, uMid, clamp(tObs / 0.55, 0.0, 1.0));
+    col = mix(col, vec3(1.0), clamp(tObs - 1.0, 0.0, 0.6) + 0.35 * uFeed * exp(-(r - RIN) / 2.0));   // white-hot spots
+    float beam = clamp(pow(g, 3.0), 0.12, 4.0);                          // brightness ~ g^3 (beaming)
     // a thick disk seen edge-on is brighter (longer path through the gas)
     float graze = clamp(1.0 / max(abs(normalize(dir).y), 0.1), 1.0, 10.0);
     float I = clumps * prof * edgeOut * beam * grav * sqrt(graze) * (0.9 + uLevel * 0.8) * (1.0 + 0.9 * uFeed) * uDensity;

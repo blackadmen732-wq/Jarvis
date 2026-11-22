@@ -376,6 +376,8 @@ This installs the tools (xdotool, scrot, ImageMagick), starts the helper and mak
 
 > **Use an Xorg session.** Wayland (the default on new Ubuntu) blocks apps from moving the mouse or taking screenshots. On the login screen click the gear icon and choose **"Ubuntu on Xorg"**.
 >
+> **On a Chromebook:** Linux runs in its own box there, so laptop control only sees and drives **Linux apps** (the terminal, Linux Firefox, files in the Linux folder), not ChromeOS or the Chrome browser itself. Jarvis Hands (section 11) works the same way: commands run inside Linux. To let Jarvis use a browser on a Chromebook, install Firefox inside Linux (`sudo apt install firefox-esr`) and ask Jarvis to use that.
+>
 > **Be careful what you ask.** With control on, Jarvis can do anything you can: delete files, send messages, run commands. A log of every step is kept in `~/.local/state/jarvis-control.log`.
 
 ---
