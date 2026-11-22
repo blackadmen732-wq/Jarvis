@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Jarvis OS</title>
   <meta name="theme-color" content="#030508">
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -17,7 +18,7 @@
 
   <header class="top">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"></span>
+      <img class="brand-logo" src="assets/logo.svg" alt="" aria-hidden="true">
       <div>
         <div class="brand-name">J.A.R.V.I.S</div>
         <div class="brand-sub">Jarvis OS · Neural Router</div>
@@ -47,6 +48,32 @@
     </div>
   </aside>
 
+  <!-- control-room readouts around the core (live data) -->
+  <div class="readout ro-tl" aria-hidden="true">
+    <div class="ro-title">CORE TELEMETRY</div>
+    <div class="ro-row"><span>FORM</span><b id="ro-core">—</b></div>
+    <div class="ro-row"><span>STATE</span><b id="ro-state">STANDBY</b></div>
+    <div class="ro-row"><span>FIELD</span><b id="ro-field">0.00</b></div>
+    <div class="ro-row"><span>UPTIME</span><b id="ro-up">00:00:00</b></div>
+    <div class="ro-bars" id="ro-bars"></div>
+  </div>
+  <div class="readout ro-tr" aria-hidden="true">
+    <div class="ro-title">ROUTING MATRIX</div>
+    <div class="ro-row"><span>LINK</span><b id="ro-link">—</b></div>
+    <div class="ro-row"><span>VIA</span><b id="ro-via">—</b></div>
+    <div class="ro-row"><span>LATENCY</span><b id="ro-lat">—</b></div>
+    <div class="ro-row"><span>NODES</span><b id="ro-nodes">—</b></div>
+    <div class="ro-hex" id="ro-hex"></div>
+  </div>
+  <div class="readout ro-bl" aria-hidden="true">
+    <svg class="gauge" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" class="g-bg"/><circle cx="32" cy="32" r="26" class="g-fg" id="g-signal"/><text x="32" y="36" id="g-signal-t">0</text></svg>
+    <div class="g-label">SIGNAL</div>
+  </div>
+  <div class="readout ro-br" aria-hidden="true">
+    <svg class="gauge" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" class="g-bg"/><circle cx="32" cy="32" r="26" class="g-fg" id="g-links"/><text x="32" y="36" id="g-links-t">0</text></svg>
+    <div class="g-label">LINKS OK</div>
+  </div>
+
   <div class="status-line" id="status-line">
     <div class="state-label" id="state-label">Standby</div>
     <div class="active-model" id="active-model">—</div>
@@ -61,6 +88,7 @@
       <button class="toggle on" id="t-fx" type="button" aria-pressed="true" title="Interface sounds">FX</button>
       <button class="toggle" id="t-scene" type="button" title="Change the core / scene (Black Hole, Sun, Reactor, Neural Brain, Data Stream)">◐ Auto</button>
       <button class="toggle on" id="t-color" type="button" title="Change the colour theme">● Amber</button>
+      <button class="toggle" id="t-play" type="button" aria-pressed="false" title="Play with the black hole: throw light, gas, stars and planets">✦ Play</button>
       <button class="toggle on" id="t-holo" type="button" aria-pressed="true" title="Holographic machine rings, drones and radar">Holo</button>
     </div>
     <form class="dock-input" id="form" autocomplete="off">
@@ -69,6 +97,28 @@
       <button class="send" type="submit" aria-label="Send">➤</button>
     </form>
   </footer>
+
+  <div class="ctrl-banner" id="ctrl-banner" hidden role="status">
+    <span class="ctrl-dot"></span><b>CONTROL ACTIVE</b><span id="ctrl-step">READY</span><span id="ctrl-thought">Waiting for your order</span>
+    <button type="button" class="ghost" id="ctrl-stop" title="Take your laptop back (Esc, or push the mouse into the top-left corner)">Stop · Esc</button>
+  </div>
+  <div class="play-bar" id="play-bar" hidden>
+    <div class="pb-tools" role="group" aria-label="What to throw">
+      <button type="button" class="toggle" data-tool="light" title="A beam of light: watch it bend, loop and fall in">✦ Light</button>
+      <button type="button" class="toggle" data-tool="gas" title="A gas cloud: it spirals in, heats up and feeds the disk">☁ Gas</button>
+      <button type="button" class="toggle" data-tool="star" title="A star: tides stretch it into a stream">★ Star</button>
+      <button type="button" class="toggle" data-tool="planet" title="A planet: it heats up and breaks apart">● Planet</button>
+      <button type="button" class="ghost" id="pb-clear" title="Remove everything and reset the hole">Clear</button>
+    </div>
+    <div class="pb-row">
+      <span class="pb-label">View</span>
+      <button type="button" class="toggle" data-view="wide" title="Pull back and see everything">Wide</button>
+      <button type="button" class="toggle" data-view="close" title="Fly in close to the disk">Close</button>
+      <button type="button" class="toggle" data-view="follow" title="Ride along with the last thing you threw">Follow</button>
+      <label class="pb-label pb-dens" title="How much glowing matter the disk holds">Plasma <input type="range" id="pb-density" min="0.4" max="2.6" step="0.05"></label>
+    </div>
+    <div class="pb-stats"><span id="pb-hint">Pick something, then click in space · drag to turn</span><span id="pb-stats">MASS 1.00</span></div>
+  </div>
 
   <div class="voice-panel panel-pop" id="voice-panel" hidden>
     <div class="panel-head"><span>Voice Studio</span><button class="ghost" id="voice-close" type="button">Close</button></div>

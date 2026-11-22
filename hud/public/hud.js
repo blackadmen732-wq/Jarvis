@@ -19,6 +19,7 @@
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   let fxOn = store.get('fx', true), lastType = 0, ac = null, holoOn = store.get('holo', true), sceneName = store.get('scene2', 'auto'), homeCore = store.get('home', 'blackhole'), themeName = store.get('theme', 'amber');
   if (sceneName === 'space') sceneName = 'auto';
+  document.body.dataset.scene = sceneName;
   const GLYPHS = '▓▒░<>/\\|=+*#ABCDEF0123456789';
 
   function setState(s) {
@@ -411,11 +412,41 @@
   }
   function switchTo(id) {
     if (id === S.active) return;
-    const m = S.models.find(x => x.id === id);
+    const from = S.models.find(x => x.id === S.active), to = S.models.find(x => x.id === id);
     command({ action: 'switch', id });
     fx('route');
     flash(id);
-    if (m) addMsg('sys', 'Jarvis', `Routing to ${m.label}.`);
+    if (to) linkCard(from, to);
+  }
+
+  // ---- LINK TRANSFER card: shows exactly which model the link moves to
+  let pendingLink = null;
+  function linkCard(from, to) {
+    const tag = (txt, cls) => `<span class="lc-tag ${cls}">${txt}</span>`;
+    const badge = m => m ? [m.local ? tag('LOCAL', 'local') : tag('CLOUD', 'cloud'), m.paid ? tag('PAID', 'paid') : tag('FREE', 'free')].join('') : '';
+    const el = document.createElement('div');
+    el.className = 'link-card';
+    el.innerHTML = `
+      <div class="lc-head"><span>⚡ LINK TRANSFER</span><span class="lc-status">ESTABLISHING…</span></div>
+      <div class="lc-row lc-from"><span class="lc-k">FROM</span><span class="lc-name"></span><span class="lc-sub"></span></div>
+      <div class="lc-beam"><i></i></div>
+      <div class="lc-row lc-to"><span class="lc-k">TO</span><span class="lc-name"></span><span class="lc-sub"></span></div>
+      <div class="lc-tags">${badge(to)}</div>
+      <div class="lc-model"></div>`;
+    el.querySelector('.lc-from .lc-name').textContent = from ? from.label : '—';
+    el.querySelector('.lc-from .lc-sub').textContent = from ? from.group : '';
+    el.querySelector('.lc-to .lc-name').textContent = to.label;
+    el.querySelector('.lc-to .lc-sub').textContent = to.group;
+    el.querySelector('.lc-model').textContent = to.model;
+    log.appendChild(el); log.scrollTop = log.scrollHeight;
+    decipher(el.querySelector('.lc-to .lc-name'), to.label, 700);
+    setTimeout(() => { el.classList.add('done'); el.querySelector('.lc-status').textContent = 'LINKED'; fx('msg'); }, 1100);
+    pendingLink = { el, id: to.id };
+  }
+  function linkLatency(id, ms) {
+    if (!pendingLink || pendingLink.id !== id) return;
+    const s = pendingLink.el.querySelector('.lc-status'); s.textContent = `LINKED · ${(ms / 1000).toFixed(2)} s`;
+    pendingLink = null;
   }
   function toggleSeat(id) {
     let ids = S.council.includes(id) ? S.council.filter(x => x !== id) : [...S.council, id];
@@ -442,7 +473,7 @@
   // ------------------------------------------------------------------ Jarvis Hands (your computer, ../../hands/hands.js)
   // This page (in YOUR browser, on your computer) is what talks to Jarvis Hands, never the server in Docker.
   // Pair once: start `node hands/hands.js`, then type "hands code <code>". Steps run straight away.
-  const HANDS = 'http://localhost:3002';
+  const HANDS = 'http://localhost:3003';   // Jarvis Hands (terminal); laptop control is 3002
   let handsToken = store.get('handsToken', ''), handsInfo = null, queuedStep = null;
   async function handsFetch(p, body) {
     const r = await fetch(HANDS + p, body ? { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': handsToken }, body: JSON.stringify(body) }
@@ -528,6 +559,7 @@
             if (pending !== null) pending = d.text;
           } else if (d.type === 'end') {
             if (bubble) { bubble.classList.remove('typing'); if (d.ms) bubble.querySelector('.ms').textContent = (d.ms / 1000).toFixed(1) + 's'; }
+            if (d.ms) linkLatency(d.speaker, d.ms);
             const speakIt = role === 'lina' ? false : role !== 'member' || !S.councilMode ? true : store.get('speakMembers', false);   // Jarvis explains Lina in English
             if (speakIt) pending = bubbleText;
             if (role === 'answer' || role === 'verdict') finalText = bubbleText;
@@ -540,9 +572,11 @@
             addMsg('sys', 'Jarvis', `${d.label} taking over.`);
             beams.push({ from: d.from, to: d.to, life: 2.5 });
           } else if (d.type === 'command') {
-            if (d.action === 'switch') { S.active = d.id; render(); flash(d.id); fx('route'); }
+            if (d.action === 'switch') { const from = S.models.find(x => x.id === S.active), to = S.models.find(x => x.id === d.id); S.active = d.id; render(); flash(d.id); fx('route'); if (to) linkCard(from, to); }
             if (d.action === 'voice') changeVoice(d.query);
             if (d.action === 'holo') setHolo(d.on, true);
+            if (d.action === 'play') window.JarvisScene?.play?.(d.what);
+            if (d.action === 'control') controlCmd(d);
             if (d.action === 'scene') setScene(d.scene, true);
             if (d.action === 'theme') setTheme(d.theme, true);
             if (d.action === 'council') { S.councilMode = d.on; render(); chime(d.on ? 520 : 880, d.on ? 780 : 520); }
@@ -694,6 +728,67 @@
     const total = synth.getVoices().length;
     $('#vp-note').textContent = (studio.online ? `${studio.voices.length} studio + ` : '') + (total ? `${total} system voices` : 'system voices load on first use');
   }
+  // ---- laptop control: the helper (control/jarvis_control.py) runs on the laptop at 127.0.0.1:3002
+  const CONTROL_URL = 'http://127.0.0.1:3002';
+  let ctrlOn = false, ctrlPoll = null, ctrlSeen = '';
+  async function ctrlFetch(path, body) {
+    const r = await fetch(CONTROL_URL + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Jarvis': '1' }, body: JSON.stringify(body) } : {});
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j;
+  }
+  function ctrlFail(e) {
+    const msg = /fetch|network|load/i.test(e.message) ? "The laptop control helper isn't running. On your laptop run: control/install.sh" : 'Laptop control: ' + e.message;
+    addMsg('jarvis err', 'Jarvis', msg); speakText(msg); setControl(false);
+  }
+  function controlCmd(d) {
+    if (!d.on) { ctrlFetch('/stop', {}).catch(() => {}); setControl(false); return; }
+    setControl(true);
+    if (d.direct) ctrlFetch('/do', d.direct).catch(ctrlFail);
+    else if (d.task) { ctrlSeen = ''; ctrlFetch('/task', { goal: d.task }).catch(ctrlFail); }
+    else ctrlFetch('/status').then(s => { if (s.problem) ctrlFail(new Error(s.problem)); }).catch(ctrlFail);
+  }
+  function setControl(on) {
+    ctrlOn = on; document.body.classList.toggle('control-on', on);
+    $('#ctrl-banner').hidden = !on;
+    if (on && !ctrlPoll) ctrlPoll = setInterval(pollControl, 900);
+    if (!on && ctrlPoll) { clearInterval(ctrlPoll); ctrlPoll = null; }
+    if (on) fx('route');
+  }
+  async function pollControl() {
+    try {
+      const s = await ctrlFetch('/status');
+      $('#ctrl-step').textContent = s.active ? `STEP ${s.step}` : 'READY';
+      $('#ctrl-thought').textContent = s.active ? (s.thought || s.action || 'Working…') : 'Waiting for your order · say what to do';
+      const fin = s.error ? 'ERR:' + s.error : s.done;
+      if (!s.active && fin && fin !== ctrlSeen) {
+        ctrlSeen = fin;
+        if (s.error) { addMsg('jarvis err', 'Jarvis', 'Laptop control: ' + s.error); }
+        else { addMsg('jarvis', 'Jarvis', s.done); speakText(s.done); }
+      }
+    } catch { $('#ctrl-thought').textContent = 'Helper not reachable'; }
+  }
+  $('#ctrl-stop').addEventListener('click', () => send('stop control'));
+
+  // ---- black hole play bar
+  let playTool = null, playOpen = false;
+  function setupPlay() {
+    const bar = $('#play-bar'), btn = $('#t-play'), tools = bar.querySelectorAll('[data-tool]');
+    const pick = id => { playTool = id; tools.forEach(b => b.classList.toggle('on', b.dataset.tool === id));
+      $('#pb-hint').textContent = id ? `Click in space to throw ${id === 'light' ? 'light' : 'a ' + id} · drag to turn` : 'Pick something, then click in space · drag to turn'; };
+    const open = on => { playOpen = on; bar.hidden = !on; btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', on); if (!on) pick(null); else if (!playTool) pick('light'); };
+    btn.addEventListener('click', () => { fx('click'); open(bar.hidden); });
+    tools.forEach(b => b.addEventListener('click', () => { fx('click'); pick(b.dataset.tool); }));
+    $('#pb-clear').addEventListener('click', () => { fx('click'); window.JarvisScene?.play?.('clear'); });
+    bar.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => { fx('click');
+      bar.querySelectorAll('[data-view]').forEach(x => x.classList.toggle('on', x === b)); window.JarvisScene?.setView?.(b.dataset.view); }));
+    const dens = $('#pb-density'); dens.value = store.get('density', 1);
+    const applyDens = () => window.JarvisScene?.setDensity?.(+dens.value);
+    dens.addEventListener('input', () => { store.set('density', +dens.value); applyDens(); });
+    addEventListener('load', () => setTimeout(applyDens, 500)); setTimeout(applyDens, 1500);
+  }
+  function playStats(st) {
+    const el = $('#pb-stats'); if (!el || $('#play-bar').hidden) return;
+    el.textContent = `MASS ${st.mass.toFixed(2)} · FED ${st.fed} · IN FLIGHT ${st.particles}${st.feed > 0.15 ? ' · JETS ACTIVE' : ''}`;
+  }
   function setupVoiceStudio() {
     const panel = $('#voice-panel'), btn = $('#t-voices');
     const open = on => { panel.hidden = !on; btn.classList.toggle('on', on); btn.setAttribute('aria-expanded', on); if (on) loadStudioVoices(); };
@@ -711,6 +806,7 @@
     if (!synth) $('#vp-note').textContent = 'This browser has no speech voices.';
   }
   setupVoiceStudio();
+  setupPlay();
   if (synth) { pickVoice(); synth.onvoiceschanged = pickVoice; }
   loadStudioVoices();
 
@@ -812,7 +908,7 @@
   document.addEventListener('keydown', e => {
     if (e.key === '/' && document.activeElement !== $('#input')) { e.preventDefault(); $('#input').focus(); }
     if (e.code === 'Space' && e.ctrlKey) { e.preventDefault(); mic.click(); }
-    if (e.key === 'Escape') { stopSpeaking(); stopRec(); setState('idle'); }
+    if (e.key === 'Escape') { stopSpeaking(); stopRec(); setState('idle'); if (ctrlOn) send('stop control'); }
   });
 
   // ------------------------------------------------------------------ toggles
@@ -829,12 +925,12 @@
     if (announce) { const m = on ? 'Holographic systems online.' : 'Holograms offline.'; addMsg('sys', 'Jarvis', m); speakText(m); }
   }
   $('#t-holo').addEventListener('click', () => setHolo(!holoOn, false));
-  const SCENE_NAMES = { auto: 'Auto core', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit Sphere', pulse: 'Pulse Sphere', plasma: 'Plasma Orb', portal: 'Warp Portal', liquid: 'Liquid Glass', reactor: 'Reactor', brain: 'Neural Brain', stream: 'Data Stream' };
-  const SCENE_SHORT = { auto: 'Auto', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit', pulse: 'Pulse', plasma: 'Plasma', portal: 'Portal', liquid: 'Liquid', reactor: 'Reactor', brain: 'Brain', stream: 'Stream' };
-  const HOME_OK = ['blackhole', 'sun', 'circuit', 'pulse', 'plasma', 'portal', 'liquid', 'reactor'];
+  const SCENE_NAMES = { auto: 'Auto core', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit Sphere', pulse: 'Pulse Sphere', plasma: 'Plasma Orb', portal: 'Warp Portal', liquid: 'Liquid Glass', bloom: 'Bloom', reactor: 'Reactor', brain: 'Neural Brain', stream: 'Data Stream' };
+  const SCENE_SHORT = { auto: 'Auto', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit', pulse: 'Pulse', plasma: 'Plasma', portal: 'Portal', liquid: 'Liquid', bloom: 'Bloom', reactor: 'Reactor', brain: 'Brain', stream: 'Stream' };
+  const HOME_OK = ['blackhole', 'sun', 'circuit', 'pulse', 'plasma', 'portal', 'liquid', 'bloom', 'reactor'];
   function setScene(name, announce) {
     if (!SCENE_NAMES[name]) return;
-    sceneName = name; store.set('scene2', name);
+    sceneName = name; store.set('scene2', name); document.body.dataset.scene = name;
     if (HOME_OK.includes(name)) { homeCore = name; store.set('home', name); }
     const b = $('#t-scene'); decipher(b, '◐ ' + SCENE_SHORT[name], 400); b.classList.toggle('on', true);
     fx('route');
@@ -950,10 +1046,34 @@
   window.__jarvis = { send, S };   // handy for testing in the browser console
   // Bridge for the 3D scene (scene3d.js)
   window.JarvisHUD = {
-    getFrame: () => ({ theme: themeName, scene: sceneName, home: homeCore, holo: holoOn, level, uiState, active: S.active, speakingId, flowDir, council: S.council, councilMode: S.councilMode, beams, version: modelsVersion }),
+    playStats, getFrame: () => ({ playTool, playOpen, theme: themeName, scene: sceneName, home: homeCore, holo: holoOn, level, uiState, active: S.active, speakingId, flowDir, council: S.council, councilMode: S.councilMode, beams, version: modelsVersion }),
     models: () => S.models,
     onNodeClick: id => switchTo(id),
     fx: name => fx(name),
   };
   dispatchEvent(new Event('jarvis-ready'));
+
+  // ---- control-room readouts: real data, refreshed a few times a second
+  const t0Up = Date.now(), bars = $('#ro-bars');
+  if (bars) for (let i = 0; i < 24; i++) bars.appendChild(document.createElement('i'));
+  const setGauge = (id, k, txt) => { const c = $(id); if (c) c.style.strokeDashoffset = (163.4 * (1 - Math.max(0, Math.min(1, k)))).toFixed(1); const t = $(id + '-t'); if (t) t.textContent = txt; };
+  function updateReadouts() {
+    if (!$('#ro-core')) return;
+    const sc = sceneName === 'auto' ? `AUTO · ${(SCENE_SHORT[homeCore] || 'CORE').toUpperCase()}` : (SCENE_SHORT[sceneName] || sceneName).toUpperCase();
+    $('#ro-core').textContent = sc;
+    $('#ro-state').textContent = ({ idle: 'STANDBY', listening: 'LISTENING', thinking: 'ROUTING', speaking: 'TRANSMITTING' })[uiState] || uiState.toUpperCase();
+    $('#ro-field').textContent = (level * 9.81).toFixed(2) + ' T';
+    const s = Math.floor((Date.now() - t0Up) / 1000); $('#ro-up').textContent = [s / 3600, s / 60 % 60, s % 60].map(x => String(Math.floor(x)).padStart(2, '0')).join(':');
+    bars && [...bars.children].forEach((b, i) => { const v = levelHist[levelHist.length - 24 + i] || 0; b.style.height = (2 + v * 20).toFixed(0) + 'px'; });
+    const a = S.models.find(m => m.id === S.active);
+    $('#ro-link').textContent = a ? a.label.toUpperCase() : '—';
+    $('#ro-via').textContent = a ? a.group.toUpperCase() : '—';
+    $('#ro-lat').textContent = a && a.status && a.status.ms ? (a.status.ms / 1000).toFixed(2) + ' s' : '—';
+    const inst = S.models.filter(m => m.installed).length, okN = S.models.filter(m => m.status.state === 'ok').length;
+    $('#ro-nodes').textContent = `${okN} OK / ${inst}`;
+    const hex = $('#ro-hex'); if (hex && Math.random() < 0.3) hex.textContent = Array.from({ length: 3 }, () => Array.from({ length: 4 }, () => Math.floor(Math.random() * 65536).toString(16).toUpperCase().padStart(4, '0')).join(' ')).join('\n');
+    setGauge('#g-signal', level, Math.round(level * 100));
+    setGauge('#g-links', inst ? okN / inst : 0, `${okN}/${inst}`);
+  }
+  setInterval(updateReadouts, 250);
 })();

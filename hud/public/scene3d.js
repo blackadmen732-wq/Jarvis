@@ -9,12 +9,14 @@ import { EffectComposer, RenderPass, EffectPass, BloomEffect, SMAAEffect, ToneMa
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createHolo } from './holo.js';
 import { createScenes } from './scenes.js';
-import { createBlackHole } from './blackhole.js';
+import { createBlackHole, BASE_SCALE } from './blackhole.js';
+import { createPlay } from './bhplay.js';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { createSun, SUN_R } from './sun.js';
 import { createCores, CORE_RADIUS } from './cores.js';
+import { createSky } from './sky.js';
 
 // Colour themes: core, disk, sun, plasma lightning (the HUD panels follow via CSS in hud.js)
 export const THEMES = {
@@ -66,13 +68,9 @@ function start() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#030508');
   // a real galaxy all around: ESO's Milky Way panorama (ESO/S. Brunier, CC BY 4.0)
-  const skyTex = new THREE.TextureLoader().load(mobile ? 'assets/milkyway-small.jpg' : 'assets/milkyway.jpg', tex => {
-    tex.mapping = THREE.EquirectangularReflectionMapping; tex.colorSpace = THREE.SRGBColorSpace;
-    scene.background = tex; scene.backgroundIntensity = 0.42; scene.backgroundRotation.set(0.55, 0.3, 0.42);
-  });
-  skyTex.generateMipmaps = false; skyTex.minFilter = THREE.LinearFilter;
+  const sky = createSky(scene, { mobile, src: mobile ? 'assets/milkyway-small.jpg' : 'assets/milkyway.jpg' });
   scene.fog = new THREE.FogExp2(0x030508, 0.028);
-  const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 300);
+  const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 1200);
   camera.position.set(0, mobile ? 4.2 : 3.0, mobile ? 21 : 12);
 
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -234,13 +232,27 @@ function start() {
   const dust = new Float32Array(1500 * 3);
   for (let i = 0; i < 1500; i++) { const v = new THREE.Vector3(rand() - 0.5, rand() - 0.5, rand() - 0.5).normalize().multiplyScalar(40 + rand() * 50); dust.set([v.x, v.y, v.z], i * 3); }
   const dGeo = new THREE.BufferGeometry(); dGeo.setAttribute('position', new THREE.BufferAttribute(dust, 3));
-  scene.add(new THREE.Points(dGeo, new THREE.PointsMaterial({ color: 0x6a8fb5, size: 0.18, ...additive, opacity: 0.5 })));
+  // (close dust replaced by the sky module's star layers)
 
   // holographic tech layer: gear-ring machine, drones, radar
   const holo = createHolo(scene, glow, { mobile });
   const scenes = createScenes(scene, { glow, mobile, reduce, pixelRatio: renderer.getPixelRatio() });
   let reactorVis = 1, floorVis = 1, hudVis = 1, firstFrame = true;
-  const blackhole = createBlackHole(scene, renderer, camera, { mobile, reduce, sky: skyTex });
+  const orbitAngle = {};
+  const blackhole = createBlackHole(scene, renderer, camera, { mobile, reduce });
+  // Play mode: throw light, gas, stars and planets into the hole
+  const play = createPlay(blackhole.frame, { mobile, onFeed: m => blackhole.addFeed(m), onEvent: e => hud.fx && hud.fx(e === 'disrupt' ? 'route' : 'tick') });
+  const playPlane = new THREE.Plane(), playHit = new THREE.Vector3();
+  function playAt(type, cx, cy) {
+    // where the click lands on the plane through the hole that faces the camera
+    mouse.set(cx / innerWidth * 2 - 1, -(cy / innerHeight) * 2 + 1);
+    ray.setFromCamera(mouse, camera);
+    playPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3());
+    if (!ray.ray.intersectPlane(playPlane, playHit)) return;
+    const local = blackhole.frame.worldToLocal(playHit.clone());
+    const view = blackhole.frame.worldToLocal(camera.position.clone()).negate().normalize();
+    play.spawn(type, local, view);
+  }
   const sun = createSun(scene, glow, { mobile });
   const cores = createCores(scene, glow, { mobile });
   const hudMats = []; hudGroup.traverse(o => { if (o.material) { o.material.userData.base = o.material.opacity; hudMats.push(o.material); } });
@@ -362,6 +374,7 @@ function start() {
       if (n.bolts) { n.bolts.forEach(releaseBolt); n.bolts = null; }
       n.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== pulseMat) o.material.dispose(); });
       if (n.label.element.parentNode) n.label.element.parentNode.removeChild(n.label.element);
+      if (n.orbitLine) { nodeGroup.remove(n.orbitLine); n.orbitLine.geometry.dispose(); n.orbitLine.material.dispose(); }
       nodeGroup.remove(n.group);
     }
     nodes = []; hitTargets.length = 0;
@@ -370,10 +383,11 @@ function start() {
   function buildNodes() {
     disposeNodes();
     const list = hud.models().filter(m => m.installed || m.id === hud.getFrame().active);
-    const n = list.length, R = mobile ? 3.0 : 3.95;
+    const n = list.length, R0 = mobile ? 2.7 : 3.55, dR = mobile ? 0.32 : 0.48;
     list.forEach((m, i) => {
       const a = i / n * TAU + 0.35;
-      const pos = new THREE.Vector3(Math.cos(a) * R, 0.55 + Math.sin(i * 1.9) * (mobile ? 2.2 : 1.25), Math.sin(a) * R);
+      const R = R0 + (i % 4) * dR;                                       // different orbits = different speeds
+      const pos = new THREE.Vector3(Math.cos(a) * R, 0.55 + Math.sin(i * 1.9) * (mobile ? 2.0 : 1.1), Math.sin(a) * R);
       const g = new THREE.Group(); nodeGroup.add(g);
       const st = m.status ? m.status.state : 'ready';
       const col = st === 'error' ? RED : st === 'missing' ? GREY : BLUE;
@@ -422,7 +436,11 @@ function start() {
       el.addEventListener('mouseleave', () => { if (hoverId === m.id) hoverId = null; });
       const label = new CSS2DObject(el); label.position.copy(pos).add(new THREE.Vector3(0, -0.42, 0)); g.add(label);
 
-      nodes.push({ id: m.id, pos, group: g, orb, halo, ring, route, routeMat, tube, curve, label, el, phase: r() * TAU });
+      // faint orbit path at this model's distance and height
+      const op = []; for (let k = 0; k <= 160; k++) { const aa = k / 160 * TAU; op.push(new THREE.Vector3(Math.cos(aa) * R, pos.y, Math.sin(aa) * R)); }
+      const orbitLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(op), new THREE.LineBasicMaterial({ color: BLUE, ...additive, opacity: 0.09 }));
+      nodeGroup.add(orbitLine);
+      nodes.push({ id: m.id, pos, R, group: g, orb, halo, ring, route, routeMat, tube, curve, label, el, orbitLine, phase: r() * TAU, w: 0.9 / Math.pow(R, 1.5) });
     });
   }
   const nodeById = id => nodes.find(n => n.id === id);
@@ -452,17 +470,78 @@ function start() {
   renderer.domElement.addEventListener('pointermove', e => {
     const id = pick(e);
     if (id !== hoverId && id && hud.fx) hud.fx('tick');
-    hoverId = id; renderer.domElement.style.cursor = id ? 'pointer' : 'grab';
+    if (held) return;
+    if (!id && scenes.vis.blackhole > 0.5) { mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(mouse, camera);
+      if (ray.intersectObjects(grabTargets(), true).length) { renderer.domElement.style.cursor = 'grab'; renderer.domElement.title = 'Drag me into the black hole'; return; } }
+    renderer.domElement.title = '';
+    hoverId = id; renderer.domElement.style.cursor = id ? 'pointer' : (hud.getFrame().playTool && scenes.vis.blackhole > 0.5 ? 'crosshair' : 'grab');
   });
   renderer.domElement.addEventListener('pointerdown', e => { downXY = [e.clientX, e.clientY]; });
+
+  // ---------------------------------------------------------------- grab and throw (black hole mode)
+  // Press on an orbiting planet, a drone, or anything you threw, drag it, let go: it flies with your swipe.
+  let held = null;
+  const grabPlane = new THREE.Plane(), grabHit = new THREE.Vector3();
+  function grabTargets() { return scenes.vis.blackhole > 0.5 ? [...blackhole.grabbables(), ...holo.grabbables(), ...play.bodyObjects()] : []; }
+  function grabPoint(e) {
+    mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(mouse, camera);
+    return ray.ray.intersectPlane(grabPlane, grabHit) ? play.toLocal(grabHit) : null;
+  }
+  addEventListener('pointerdown', e => {
+    if (e.target !== renderer.domElement || e.button !== 0) return;
+    const targets = grabTargets(); if (!targets.length) return;
+    mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(mouse, camera);
+    ray.params.Line.threshold = 0.15;
+    const hit = ray.intersectObjects(targets, true)[0]; if (!hit) return;
+    let top = hit.object; while (top && !targets.includes(top)) top = top.parent; if (!top) return;
+    let body = play.bodyFor(top);
+    if (!body && blackhole.take(top)) body = play.adopt(top, 'planet', { tidal: 3.8, debris: top.geometry?.parameters?.radius > 0.4 ? 1200 : 600, onGone: m => blackhole.giveBack(m) });
+    else if (!body && holo.take(top)) body = play.adopt(top, 'drone', { tidal: 3.2, debris: 350, onGone: g => holo.giveBack(g) });
+    if (!body) return;
+    controls.enabled = false;
+    grabPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()), top.getWorldPosition(new THREE.Vector3()));
+    held = { body, hist: [] }; renderer.domElement.style.cursor = 'grabbing'; hud.fx && hud.fx('tick');
+    renderer.domElement.setPointerCapture(e.pointerId);
+  }, true);
+  renderer.domElement.addEventListener('pointermove', e => {
+    if (!held) return;
+    const p = grabPoint(e); if (!p) return;
+    play.hold(held.body, p);
+    const now = performance.now(); held.hist.push({ p: p.clone(), t: now });
+    while (held.hist.length > 2 && now - held.hist[0].t > 120) held.hist.shift();
+  });
+  function letGo() {
+    if (!held) return;
+    const h = held.hist, now = performance.now(), v = new THREE.Vector3();
+    if (h.length > 1 && now - h[h.length - 1].t < 80) {
+      const a = h[0], b = h[h.length - 1];
+      v.subVectors(b.p, a.p).divideScalar(Math.max(0.016, (b.t - a.t) / 1000) * 16);     // swipe speed -> simulation speed
+    }
+    play.release(held.body, v); followBody = held.body; held = null;
+    controls.enabled = true; downXY = null; renderer.domElement.style.cursor = 'grab';
+  }
+  renderer.domElement.addEventListener('pointerup', letGo);
+  renderer.domElement.addEventListener('pointercancel', letGo);
+
+  // ---------------------------------------------------------------- camera views for the black hole
+  let camMode = 'free', camGoal = 0, camMoving = false, followBody = null;
+  const homeTarget = new THREE.Vector3(0, 0.2, 0), lastTarget = new THREE.Vector3(0, 0.2, 0), goalTarget = new THREE.Vector3();
+  function setView(m) {
+    camMode = m; camMoving = true; lastTouch = performance.now();
+    camGoal = m === 'wide' ? 13 : m === 'close' ? 4.0 : 3.0;
+    controls.autoRotate = m === 'wide';
+    if (m === 'follow') followBody = play.lastBody();
+  }
   renderer.domElement.addEventListener('pointerup', e => {
-    if (!downXY || Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 6) return;
-    const id = pick(e); if (id) hud.onNodeClick(id);
+    if (held || !downXY || Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 6) return;
+    const id = pick(e); if (id) { hud.onNodeClick(id); return; }
+    const tool = hud.getFrame().playTool;
+    if (tool && scenes.vis.blackhole > 0.5) playAt(tool, e.clientX, e.clientY);
   });
 
   // ---------------------------------------------------------------- loop
   const clock = new THREE.Clock();
-  let phase = 0, listen = 0, t = 0;
+  let phase = 0, listen = 0, t = 0, statT = 0;
   function tick() {
     const dt = Math.min(0.05, clock.getDelta()); t += dt;
     const f = hud.getFrame();
@@ -495,9 +574,19 @@ function start() {
     sun.update(dt, t, L, scenes.vis.sun);
     cores.update(dt, t, L, scenes.vis, camera);
     const orbitVis = scenes.vis.blackhole + scenes.vis.sun;
-    nodeGroup.rotation.y += dt * 0.045 * orbitVis;                       // models orbit the core like satellites
-    const coreR = 0.75 * reactorVis + 1.35 * scenes.vis.blackhole + SUN_R * 1.08 * scenes.vis.sun + 2.0 * scenes.vis.brain + Object.keys(CORE_RADIUS).reduce((s, k) => s + CORE_RADIUS[k] * (scenes.vis[k] || 0), 0);
+    // gravity: every model orbits on its own path, inner ones faster (Kepler), keeping its spin between rebuilds
+    const orbitSpeed = 0.35 + 1.0 * orbitVis;
+    for (const n of nodes) { orbitAngle[n.id] = (orbitAngle[n.id] || 0) + dt * n.w * orbitSpeed; n.group.rotation.y = orbitAngle[n.id];
+      n.orbitLine.material.opacity = (n.id === f.active ? 0.28 : 0.08) * (0.4 + 0.6 * orbitVis); n.orbitLine.material.color.copy(n.id === f.active ? AMBER : BLUE); }
+    play.update(dt, scenes.vis.blackhole, renderer.getPixelRatio());
+    sky.setGain(1 - 0.62 * scenes.vis.blackhole);               // space around a black hole is darker
+    sky.update(dt, t, camera, renderer.getPixelRatio());
+    const bhOn = scenes.vis.blackhole > 0.5;
+    if (bhOn !== document.body.classList.contains('bh-mode')) document.body.classList.toggle('bh-mode', bhOn);
+    if ((statT -= dt) <= 0) { statT = 0.3; const bs = blackhole.stats(), ps = play.stats(); hud.playStats && hud.playStats({ mass: bs.mass, feed: bs.feed, particles: ps.particles, fed: ps.fed }); }
+    const coreR = 0.75 * reactorVis + 2.7 * BASE_SCALE * blackhole.stats().mass * scenes.vis.blackhole + SUN_R * 1.08 * scenes.vis.sun + 2.0 * scenes.vis.brain + Object.keys(CORE_RADIUS).reduce((s, k) => s + CORE_RADIUS[k] * (scenes.vis[k] || 0), 0);
     bloom.intensity = (0.85 + L * 0.9) * (1 - 0.15 * scenes.vis.blackhole);
+    f.floorVis = floorVis;
     holo.update(dt, t, L, f.holo !== false, f, camera.position);
 
     // nodes + routes
@@ -573,19 +662,38 @@ function start() {
       const key = b.from + '>' + b.to; live.add(key);
       let o = beamObjs.get(key);
       if (!o) {
-        const curve = beamCurve(A.pos, B.pos);
-        const mat = new THREE.ShaderMaterial({ ...additive, uniforms: { uA: { value: 1 } }, ...beamShader });
-        const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.02, 5, false), mat);
-        nodeGroup.add(mesh); o = { mesh, mat, curve }; beamObjs.set(key, o);
+        const geo = new LineGeometry(); const mat = new LineMaterial({ vertexColors: true, linewidth: 2.2, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+        mat.resolution.set(innerWidth, innerHeight); lineMats.push(mat);
+        const mesh = new Line2(geo, mat); mesh.frustumCulled = false; scene.add(mesh); o = { mesh, mat }; beamObjs.set(key, o);
       }
-      const a = Math.min(1, b.life / 0.6); o.mat.uniforms.uA.value = a;
+      const Aw = A.orb.getWorldPosition(new THREE.Vector3()), Bw = B.orb ? B.orb.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
+      const curve = beamCurve(Aw, Bw), P = [], C = [];
+      for (let k = 0; k <= 32; k++) { const q = curve.getPoint(k / 32); P.push(q.x, q.y, q.z); const c = BLUE.clone().lerp(RED, k / 32); C.push(c.r, c.g, c.b); }
+      o.mesh.geometry.setPositions(P); o.mesh.geometry.setColors(C);
+      const a = Math.min(1, b.life / 0.6); o.mat.opacity = a;
       for (let k = 0; k < 3 && pi < pulses.length; k++) {
-        const p = pulses[pi++]; p.visible = true; p.position.copy(o.curve.getPointAt((t * 0.8 + k / 3) % 1)).applyMatrix4(nodeGroup.matrixWorld); p.scale.setScalar(0.26 * a);
+        const p = pulses[pi++]; p.visible = true; p.position.copy(curve.getPoint((t * 0.8 + k / 3) % 1)); p.scale.setScalar(0.26 * a);
       }
     }
-    for (const [key, o] of beamObjs) if (!live.has(key)) { nodeGroup.remove(o.mesh); o.mesh.geometry.dispose(); o.mat.dispose(); beamObjs.delete(key); }
+    for (const [key, o] of beamObjs) if (!live.has(key)) { scene.remove(o.mesh); o.mesh.geometry.dispose(); lineMats.splice(lineMats.indexOf(o.mat), 1); o.mat.dispose(); beamObjs.delete(key); }
     for (; pi < pulses.length; pi++) pulses[pi].visible = false;
 
+    // black hole views: get closer, or ride along with the last thing you threw
+    controls.minDistance = scenes.vis.blackhole > 0.5 ? 2.2 : 6;
+    if (scenes.vis.blackhole < 0.5 && camMode !== 'free') { camMode = 'free'; camMoving = false; }
+    let tgt = homeTarget;
+    if (camMode === 'follow') { if (!followBody || !followBody.obj.parent) followBody = play.lastBody(); if (followBody) tgt = followBody.obj.getWorldPosition(goalTarget); }
+    else if (camMode === 'close') tgt = goalTarget.set(0, 0, 0);
+    if (camMode !== 'free' || controls.target.distanceToSquared(homeTarget) > 1e-4) {
+      lastTarget.copy(controls.target);
+      controls.target.lerp(tgt, camMode === 'follow' ? 0.12 : 0.06);
+      if (camMode === 'follow') camera.position.add(goalTarget.subVectors(controls.target, lastTarget));   // move with it
+    }
+    if (camMoving) {
+      const off = camera.position.clone().sub(controls.target), d = off.length(), nd = d + (camGoal - d) * 0.06;
+      camera.position.copy(controls.target).add(off.setLength(nd)); if (Math.abs(nd - camGoal) < 0.05) camMoving = false;
+    }
+    if (camMode === 'follow' || camMode === 'close') lastTouch = performance.now();
     if (!controls.autoRotate && !reduce && performance.now() - lastTouch > 6000) controls.autoRotate = true;
     controls.autoRotateSpeed = f.uiState === 'thinking' ? 1.2 : 0.35;
     controls.update();
@@ -595,7 +703,11 @@ function start() {
   }
 
   document.body.classList.add('gl');
-  window.JarvisScene = { ready: true, renderer, scene, camera };
+  window.JarvisScene = { ready: true, renderer, scene, camera,
+    // voice / button entry: throw something from a random spot around the hole
+    setView, setDensity: d => blackhole.setDensity(d),
+    play: (type) => { if (type === 'clear') { play.clear(); blackhole.reset(); return; }
+      const a = Math.random() * Math.PI * 2; playAt(type, innerWidth / 2 + Math.cos(a) * innerWidth * 0.2, innerHeight * 0.46 + Math.sin(a) * innerHeight * 0.16); } };
   requestAnimationFrame(tick);
 }
 

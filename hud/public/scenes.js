@@ -14,6 +14,7 @@ export const SCENES = {
   portal:    { label: 'Portal', ...FACE, hud: 0.3 },
   plasma:    { label: 'Plasma', ...FACE },
   liquid:    { label: 'Liquid', ...FACE },
+  bloom:     { label: 'Bloom', ...FACE, hud: 0.3 },
   blackhole: { label: 'Black Hole', reactor: 0, floor: 0, hud: 0.12 },
   sun:       { label: 'Sun', reactor: 0, floor: 0.5, hud: 0.6 },
   reactor:   { label: 'Reactor', reactor: 1, floor: 1, hud: 1 },
@@ -33,7 +34,7 @@ const add = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlen
 export function createScenes(scene, { glow, mobile = false, reduce = false, pixelRatio = 1 }) {
   let rs = 99;
   const rand = () => ((rs = (rs * 16807) % 2147483647) / 2147483647);
-  const vis = { brain: 0, stream: 0, blackhole: 0, sun: 0, circuit: 0, pulse: 0, portal: 0, plasma: 0, liquid: 0, reactor: 0 };
+  const vis = { brain: 0, stream: 0, blackhole: 0, sun: 0, circuit: 0, pulse: 0, portal: 0, plasma: 0, liquid: 0, bloom: 0, reactor: 0 };
 
   // =============================================================== NEURAL BRAIN
   const brain = new THREE.Group(); scene.add(brain);
@@ -172,7 +173,8 @@ export function createScenes(scene, { glow, mobile = false, reduce = false, pixe
     // Auto: the core changes with what Jarvis is doing
     if (current === 'auto') {
       const home = SCENES[f.home] && f.home !== 'auto' ? f.home : 'blackhole';
-      current = f.uiState === 'listening' ? 'pulse' : f.uiState === 'thinking' ? 'portal'
+      // while playing with the black hole (or Jarvis is driving the laptop) the core stays put
+      current = f.playOpen ? 'blackhole' : f.uiState === 'listening' ? 'pulse' : f.uiState === 'thinking' ? 'portal'
         : f.uiState === 'speaking' ? (f.councilMode ? 'liquid' : 'plasma') : home;
     }
     const k = started ? Math.min(1, dt * 1.8) : 1; started = true;   // no fade on first load

@@ -24,7 +24,7 @@ Your own AI hub. Switch between **free models**, **paid models** and **your own 
 | Your own models | Runs downloaded or uploaded models on your machine | [ollama/ollama](https://github.com/ollama/ollama) |
 | Jarvis | Always-listening desktop voice assistant (Mac, Windows, Linux) | [isair/jarvis](https://github.com/isair/jarvis) |
 | Router | Lets Claude Code & other coding agents use free, local and uncensored models, with automatic fallback | [Alishahryar1/free-claude-code](https://github.com/Alishahryar1/free-claude-code) |
-| **Jarvis HUD** | Holographic voice interface: talk to Jarvis, see live routes to every model, switch models by voice, run an AI council | Built for this project (`hud/`) |
+| **Jarvis HUD** | Holographic voice interface: talk to Jarvis, see live routes to every model, switch models by voice, run an AI council | Built for this project (`hud/`) on [three.js](https://github.com/mrdoob/three.js) + [pmndrs/postprocessing](https://github.com/pmndrs/postprocessing) |
 
 ![Jarvis HUD in council mode](docs/hud-council.jpg)
 
@@ -246,13 +246,28 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
   | speaking | **Plasma Orb**: bright heart with electric veins |
   | council speaking | **Liquid Glass**: a shimmering glass blob |
 
-  You can also lock any core: **Black Hole** (real light-bending, glowing accretion disk, planets orbiting, your models circle it like satellites), **Sun** (boiling surface, bright limb, looping prominences), **Circuit Sphere**, **Pulse**, **Plasma**, **Portal**, **Liquid**, **Reactor**, **Neural Brain**, **Data Stream**. Say *"black hole mode"*, *"plasma core"*, *"make the core a sun"*, or *"auto mode"* to go back. The last core you lock becomes the idle core in Auto.
+  You can also lock any core: **Bloom** (thousands of shimmering fibres forming slowly turning petals), **Black Hole** (real light-bending, glowing accretion disk, planets orbiting, your models circle it like satellites), **Sun** (boiling surface, bright limb, looping prominences), **Circuit Sphere**, **Pulse**, **Plasma**, **Portal**, **Liquid**, **Reactor**, **Neural Brain**, **Data Stream**. Say *"black hole mode"*, *"plasma core"*, *"make the core a sun"*, or *"auto mode"* to go back. The last core you lock becomes the idle core in Auto.
 - **● Colour** cycles the theme: Amber, Ice (blue), Violet, Crimson, Emerald, Gold. Everything follows: core, disk, sun, panels. Or say *"change colour to blue"*.
 - **The live connection to your active model:**
   - warm colours (Amber, Gold, Crimson): a **solar flare** rises from the core, arcs out and loops around the model you're using. Switch models and a new flare grows toward the new one.
   - cool colours (Ice, Violet, Emerald): crackling **plasma lightning** from the core to the model.
   - the Neural Links panel marks it **⚡ linked** with a moving plasma bar.
-- **Holo** shows/hides the holographic layer: gear-toothed machine rings turning around the core, wireframe drones orbiting and firing scan beams, and a radar sweep on the floor. Say *"hide the holograms"* / *"show the holograms"*.
+  - the Comms Log shows a **LINK TRANSFER** card: FROM model → TO model, provider, LOCAL/CLOUD and FREE/PAID tags, the exact model ID, then **LINKED · latency** after its first reply.
+- **The backdrop is the real Milky Way** (ESO's panorama photo), colour-graded into deep blues and violets, with three layers of twinkling stars, soft nebula colour and a big **ringed planet**. **Move your mouse** and the layers shift at different depths. In Black Hole mode the sky dims (space around a black hole is dark) and the hole draws its matter, shadow and photon rings on top without warping the sky.
+- **The black hole:** a big, thick disk of glowing gas swirling inward (inner gas orbits faster), soft hot gas above and below it, relativistic beaming (the side coming at you is brighter), a sharp photon ring, and three planets on their own tilted orbits. Anything that passes behind the hole really disappears behind it. If your computer is slow, it lowers its own resolution automatically to stay smooth.
+- **Play with the black hole** (the **✦ Play** button, in Auto or Black Hole mode):
+  - pick **Light**, **Gas**, **Star** or **Planet**, then click anywhere in space to throw it in:
+    - **Light** fires a beam of light rays that bend around the hole. Some loop round it, the rest fall in (same physics as the picture).
+    - **Gas** is a cloud that spirals in, heats from red to white-hot and feeds the disk.
+    - **Star** and **Planet** dive in and get stretched into a long stream by the tides before they fall in.
+  - **grab anything that orbits** (the planets, the wireframe drones, or something you threw), drag it and let go: it flies off with your swipe. A new planet or drone forms a few seconds later.
+  - feeding it makes the disk flare, fires **jets** from the poles, and makes the hole slightly heavier and bigger (MASS in the bar). **Clear** resets everything.
+  - **View**: *Wide* (see everything), *Close* (fly in near the disk), *Follow* (ride along with the last thing you threw). Drag to turn and scroll to zoom at any time.
+  - **Plasma** slider: from a thin disk to a dense, blazing one.
+  - while Play is open, the black hole stays on screen even when Jarvis talks.
+- **Gravity:** every model orbits the core on its own path (faint orbit lines); closer ones move faster, like real planets. The linked model's orbit glows.
+- **Control-room readouts** around the core show live data: core form and state, the linked model and provider, latency, how many links work, uptime, and Signal / Links gauges.
+- **Holo** shows/hides the holographic layer: gear-toothed machine rings turning around the core, wireframe drones orbiting (grab one and throw it into the black hole), and a radar sweep on the floor (when the floor shows). Say *"hide the holograms"* / *"show the holograms"*.
 
 ![Black hole with a solar flare to the active model](docs/hud-blackhole.jpg)
 ![Blue theme: plasma lightning](docs/hud-blackhole-blue.jpg)
@@ -268,9 +283,12 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 | "Status" | Which model is active, what's online |
 | "List models" | Reads out your models |
 | "Use a female voice" / "switch voice to George" | Changes Jarvis's voice |
-| "Auto mode" / "black hole mode" / "sun mode" / "plasma core" / "circuit sphere" | Change the core |
+| "Auto mode" / "black hole mode" / "sun mode" / "bloom mode" / "plasma core" / "circuit sphere" | Change the core |
 | "Change colour to blue" / "purple theme" | Change the colour theme |
 | "Hide the holograms" / "show the holograms" | Holographic layer on/off |
+| "Throw a star in" / "send light" / "feed it gas" / "drop a planet" / "clear the black hole" | Play with the black hole |
+| "Take control of my laptop" / "take control and open my downloads folder" | Jarvis drives your laptop (section 9) |
+| "Stop" / "release control" (or Esc) | Take your laptop back |
 | "Switch to Qwen 7B" / "use the coder" / "use vision" | Your local uncensored models |
 | "Lina rule: if we lose 3 in a row, stop until I restart" | Writes it in Lina, checks it, tells you what it means (see section 9) |
 | "Confirm" / "cancel" | Save or discard the Lina rule Jarvis just checked |
@@ -337,6 +355,31 @@ Jarvis lives in Docker, which can't reach your computer. **Jarvis Hands** is a s
 
 ---
 
+## 9. Laptop control: Jarvis uses your mouse and keyboard
+
+Say **"Jarvis, take control of my laptop"** and Jarvis drives your real desktop. It looks at the screen, moves your cursor (you can watch it glide), clicks, double-clicks, drags, scrolls, types, presses shortcuts and opens apps, websites and folders. **There is no approval step**: while control is on, everything you say is an order for the laptop.
+
+- **One-shot:** *"take control and open my downloads folder"*, *"take control and search YouTube for lofi music"*.
+- **While in control:** just say the task (*"open Firefox and check the weather"*), or give quick moves with no AI needed: *"scroll down"*, *"type hello world"*, *"press ctrl plus t"*, *"click"*, *"double click"*, *"right click"*.
+- **Taking it back** (always works): say **"stop"** / **"release control"**, press **Esc** in the HUD, click **Stop** on the red **CONTROL ACTIVE** banner, or **push your mouse into the top-left corner** of the screen.
+- The red banner shows each step and what Jarvis is thinking. When it finishes, it says what it did.
+
+**Install (once, on the laptop itself; Linux):**
+
+```bash
+control/install.sh
+```
+
+This installs the tools (xdotool, scrot, ImageMagick), starts the helper and makes it start at every login. The helper listens only on `127.0.0.1:3002` and only accepts requests from the HUD page. It runs on your laptop, not in Docker, because it needs your desktop. Remove it with `control/install.sh remove`.
+
+**Which AI looks at the screen:** Gemini Flash if `GEMINI_API_KEY` is in `.env` (free tier, best at finding buttons), otherwise a free OpenRouter vision model (each step is one of your 50 free requests a day), otherwise your local `qwen3-vl-abliterated` (private, but slow on a CPU). To choose one yourself, set `CONTROL_MODEL` (plus `CONTROL_API_BASE` and `CONTROL_API_KEY`) in `.env`.
+
+> **Use an Xorg session.** Wayland (the default on new Ubuntu) blocks apps from moving the mouse or taking screenshots. On the login screen click the gear icon and choose **"Ubuntu on Xorg"**.
+>
+> **Be careful what you ask.** With control on, Jarvis can do anything you can: delete files, send messages, run commands. A log of every step is kept in `~/.local/state/jarvis-control.log`.
+
+---
+
 ## Everyday commands
 
 ```bash
@@ -360,3 +403,11 @@ docker compose logs -f open-webui             # see what's going on
 | HUD mic does nothing | Use Chrome or Edge, open it as `http://localhost:3001` (not an IP address), and allow the microphone in the address bar. |
 | HUD shows "Router offline" | `docker compose ps` and `docker compose logs router`. Usually a mistake in `.env`. |
 | A node turns red with "key missing" | Add that provider's key to `.env`, then `docker compose up -d router`. |
+
+---
+
+## Credits
+
+- Milky Way panorama: ESO/S. Brunier, [CC BY 4.0](https://www.eso.org/public/images/eso0932a/) (`hud/public/assets/`)
+- [three.js](https://github.com/mrdoob/three.js) (MIT) and [postprocessing](https://github.com/pmndrs/postprocessing) (zlib), stored in `hud/public/vendor/`
+- Studio voices: [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) (Apache-2.0); router: [free-claude-code](https://github.com/Alishahryar1/free-claude-code) (AGPL-3.0)

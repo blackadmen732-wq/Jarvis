@@ -17,7 +17,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { exec, spawn } = require('child_process');
 
-const PORT = Number(process.env.HANDS_PORT || 3002);
+const PORT = Number(process.env.HANDS_PORT || 3003);   // 3002 is laptop control (control/)
 const HUD_ORIGINS = new Set((process.env.HUD_ORIGINS || 'http://localhost:3001,http://127.0.0.1:3001').split(',').map(s => s.trim()));
 const HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
 const HOME = path.join(os.homedir(), '.jarvis-hands');

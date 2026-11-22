@@ -60,9 +60,9 @@ export function createHolo(scene, glow, { mobile = false } = {}) {
     const beamGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
     const beamMat = mat(0, 'plasma'); const beam = new THREE.Line(beamGeo, beamMat); beam.frustumCulled = false; root.add(beam);
     const trailPts = 60, trailGeo = new THREE.BufferGeometry(); trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(trailPts * 3), 3));
-    const trail = new THREE.Line(trailGeo, mat(0.18)); trail.frustumCulled = false; root.add(trail);
+    const trail = new THREE.Line(trailGeo, mat(0.18)); trail.frustumCulled = false; trail.visible = false;   // trails removed: they streak across the screen near the camera
     return { g, wire, inner, coreDot, beam, beamMat, trail, trailPts, hist: [],
-      r: 5.2 + i * 0.55, inc: (i - 2) * 0.32, speed: 0.16 + (i % 3) * 0.05, phase: i * 1.3, scanT: 1 + i, scanLife: 0 };
+      r: 4.2 + i * 0.35, inc: (i - 2) * 0.32, speed: 0.16 + (i % 3) * 0.05, phase: i * 1.3, scanT: 1 + i, scanLife: 0 };
   });
 
   // ---------------------------------------------------------------- radar sweep on the floor
@@ -99,14 +99,16 @@ export function createHolo(scene, glow, { mobile = false } = {}) {
     for (const m of mats) m.opacity = m.userData.base * vis * (m.userData.kind === 'plasma' ? 0.7 + L * 0.6 : 1);
     rings.forEach(({ g, s }) => { g.rotation.y += dt * s.speed * busy; });
     machine.rotation.y += dt * 0.03;
-    sweep.rotation.z -= dt * 0.9 * busy; sweepMat.uniforms.uVis.value = vis;
+    sweep.rotation.z -= dt * 0.9 * busy; sweepMat.uniforms.uVis.value = vis * (f.floorVis ?? 1); sweep.visible = (f.floorVis ?? 1) > 0.05;   // radar only with a floor
     for (const d of drones) {
+      if (d.taken) continue;
       const a = d.phase + t * d.speed;
       d.g.position.set(Math.cos(a) * d.r, Math.sin(a * 2.0) * 0.4 + Math.sin(d.inc) * Math.sin(a) * d.r * 0.35 + 0.6, Math.sin(a) * d.r);
       d.wire.rotation.x += dt * 0.6; d.wire.rotation.y += dt * 0.9; d.inner.rotation.y -= dt * 2;
       d.coreDot.material.opacity = (0.55 + 0.4 * Math.sin(t * 4 + d.phase)) * vis;
       // trail
-      d.hist.unshift(d.g.position.clone()); if (d.hist.length > d.trailPts) d.hist.pop();
+      d.acc = (d.acc || 0) + dt;
+      if (d.acc >= 1 / 30 || !d.hist.length) { d.acc = 0; d.hist.unshift(d.g.position.clone()); if (d.hist.length > d.trailPts) d.hist.pop(); }
       const arr = d.trail.geometry.attributes.position.array;
       for (let i = 0; i < d.trailPts; i++) { const p = d.hist[Math.min(i, d.hist.length - 1)]; arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z; }
       d.trail.geometry.attributes.position.needsUpdate = true;
@@ -117,8 +119,12 @@ export function createHolo(scene, glow, { mobile = false } = {}) {
       const ba = d.beam.geometry.attributes.position.array;
       tmp.copy(d.g.position).multiplyScalar(0.25);
       ba.set([d.g.position.x, d.g.position.y, d.g.position.z, tmp.x, tmp.y, tmp.z]); d.beam.geometry.attributes.position.needsUpdate = true;
-      d.beamMat.opacity = d.scanLife > 0 && d.g.position.distanceTo(camRef) > 6 ? (0.2 + Math.random() * 0.25) * vis : 0;
+      d.beamMat.opacity = 0;   // scan beams removed: they cut across the view
     }
   }
-  return { update, setTheme, root };
+  // drones can be grabbed and thrown into the black hole; a replacement flies in after a few seconds
+  function grabbables() { return root.visible ? drones.filter(d => !d.taken).map(d => d.g) : []; }
+  function take(g) { const d = drones.find(x => x.g === g); if (d) d.taken = true; return d; }
+  function giveBack(g) { const d = drones.find(x => x.g === g); if (!d) return; setTimeout(() => { root.add(g); g.scale.setScalar(1); d.taken = false; }, 6000); }
+  return { update, setTheme, root, grabbables, take, giveBack };
 }
