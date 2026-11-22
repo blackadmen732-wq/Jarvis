@@ -76,7 +76,7 @@ export function createPlay(frame, { mobile = false, onFeed = () => {}, onEvent =
     const line = new THREE.Line(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
     line.frustumCulled = false; line.visible = false; root.add(line);
     const head = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color: 0xdfeaff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-    head.scale.setScalar(0.9); head.visible = false; root.add(head);
+    head.scale.setScalar(0.45); head.material.opacity = 0.8; head.visible = false; root.add(head);
     photons.push({ line, head, p: new THREE.Vector3(), v: new THREE.Vector3(), h2: 0, alive: false, fade: 0, hist: [], last: new THREE.Vector3() });
   }
 
