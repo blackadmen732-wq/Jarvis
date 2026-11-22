@@ -5,7 +5,7 @@
   const TAU = Math.PI * 2;
   const store = {
     get(k, d) { try { const v = localStorage.getItem('jarvis.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-    set(k, v) { try { localStorage.setItem('jarvis.' + k, JSON.stringify(v)); } catch {} },
+    set(k, v) { try { localStorage.setItem('jarvis.' + k, JSON.stringify(v)); } catch {} try { notePref(k); } catch {} },
   };
 
   // ------------------------------------------------------------------ app state
@@ -498,6 +498,32 @@
   }
   // opened by the Jarvis app launcher (scripts/jarvis-launch.sh): it passes the pairing code in the address, so Mark
   // never has to type it. The code is stored, then removed from the address bar.
+  // ---- your choices follow you: voices, theme, eco, wake word, Jarvis/Sophia go to Supabase through the HUD server
+  // (never the Hands pairing code or anything secret). The newest copy wins; a new computer picks them up on load.
+  const PREF_KEYS = ['fx', 'holo', 'scene2', 'home', 'theme', 'voice', 'engine', 'studioVoice', 'voiceName', 'rate', 'pitch', 'wake',
+                     'assistant', 'voice.jarvis', 'voice.sophia', 'quality'];
+  let prefTimer = null, applyingPrefs = false;
+  function notePref(k) {
+    if (applyingPrefs || !PREF_KEYS.includes(k)) return;
+    clearTimeout(prefTimer);
+    prefTimer = setTimeout(() => {
+      const value = {};
+      try { for (const key of PREF_KEYS) { const v = localStorage.getItem('jarvis.' + key); if (v !== null) value[key] = v; } } catch { return; }
+      const at = new Date().toISOString(); try { localStorage.setItem('jarvis.prefs_at', JSON.stringify(at)); } catch {}
+      fetch('/api/prefs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value, updated_at: at }) }).catch(() => {});
+    }, 2500);
+  }
+  (async () => {
+    try {
+      const r = await (await fetch('/api/prefs')).json();
+      const localAt = store.get('prefs_at', null);
+      if (!r.updated_at || (localAt && Date.parse(localAt) >= Date.parse(r.updated_at))) return;
+      applyingPrefs = true;
+      for (const [k, v] of Object.entries(r.value || {})) if (PREF_KEYS.includes(k) && typeof v === 'string') localStorage.setItem('jarvis.' + k, v);
+      localStorage.setItem('jarvis.prefs_at', JSON.stringify(r.updated_at));
+      if (!sessionStorage.getItem('jarvis.prefsLoaded')) { sessionStorage.setItem('jarvis.prefsLoaded', '1'); location.reload(); }
+    } catch {} finally { applyingPrefs = false; }
+  })();
   const fromLauncher = location.hash.match(/hands=([a-f0-9]{12})/);
   if (fromLauncher) { handsToken = fromLauncher[1]; store.set('handsToken', handsToken); window.history.replaceState(null, '', location.pathname + location.search); }
   handsConnect(!fromLauncher);
@@ -644,7 +670,7 @@
             if (d.action === 'hands_proposal') { addMsg('sys hands-out', 'Proposed step · waiting for "confirm"', d.step.action === 'open' ? `open ${d.step.url}` : `$ ${d.step.command}`); chime(520, 660); }
             if (d.action === 'hands_refused') { addMsg('err', 'Hands · locked', `$ ${d.command}\nRefused: ${d.reason}`); chime(300, 220); }
             if (d.action === 'hands_run') queuedStep = d.step;
-            if (d.action === 'quality') { try { localStorage.setItem('jarvis.quality', JSON.stringify(d.level)); } catch {} if (window.JarvisScene) setTimeout(() => location.reload(), 4500); }
+            if (d.action === 'quality') { try { localStorage.setItem('jarvis.quality', JSON.stringify(d.level)); } catch {} notePref('quality'); if (window.JarvisScene) setTimeout(() => location.reload(), 4500); }
             if (d.action === 'assistant') { S.assistantLabel = d.label; applyAssistant(d.name); if (d.active) { S.active = d.active; render(); } chime(d.name === 'sophia' ? 740 : 520, d.name === 'sophia' ? 1110 : 780); }
             if (d.action === 'agent') queuedAgent = d;
           } else if (d.type === 'council') {

@@ -5,6 +5,7 @@ WORKDIR /app
 COPY hud/server.js hud/models.json ./
 COPY hud/public ./public
 COPY hands/hands.js ./hands.js
+COPY hands/sync.js ./sync.js
 ENV PORT=3001 DATA_DIR=/data PERSONA_PATH=/app/persona.md GROK_PERSONA_PATH=/app/persona-grok.md
 EXPOSE 3001
 CMD ["node", "server.js"]

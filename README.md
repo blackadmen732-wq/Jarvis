@@ -67,6 +67,15 @@ A **Jarvis** app appears in your app launcher (on a Chromebook: in the **Linux a
 
 Want it in its own window instead of a browser tab? In Chrome, click the **Install** icon in the address bar (or **⋮ → Cast, save and share → Install page as app**).
 
+### Updates and your data on a new computer
+
+**Automatic updates:** every time you open the Jarvis app, it checks GitHub. If `main` has something new, it downloads it, rebuilds and restarts by itself ("Updating Jarvis…"). It only follows `main` (finished work). If you were on a branch that has since been merged, it moves you to `main`. If you changed files yourself, it leaves them alone and doesn't update.
+
+**Sync with Supabase (your data follows you):** your agents and their run history, Lina rules, Jarvis/Sophia settings and models, and your voice, theme and eco choices are kept in your Supabase project, in a separate `jarvis` section the trading bot never touches. On a new computer: install Jarvis, put the same `JARVIS_SYNC_TOKEN` in `.env`, open the app, and everything comes back. The newest copy always wins.
+- Turn it on: make a long random value (`openssl rand -hex 24`), save it in Supabase as the secret `JARVIS_SYNC_TOKEN` (Project Settings → Edge Functions → Secrets), and put the same value in `.env` as `JARVIS_SYNC_TOKEN=`. Then restart Jarvis.
+- **Not synced, on purpose:** your API keys (type them again on a new computer), the Hands pairing code, and downloaded local models (too big).
+- Without the token, everything simply stays on this computer.
+
 ## 2. Switch models
 
 ![The hub with the model dropdown filtered to free models](docs/hub-screenshot.png)

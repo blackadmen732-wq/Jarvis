@@ -44,15 +44,39 @@ const state = {
   personality: saved.personality || config.personality || 'grok',   // 'grok' (witty, blunt, no lectures) or 'classic'
   assistant: ASSISTANTS[saved.assistant] ? saved.assistant : 'jarvis',  // who is talking: 'jarvis' or 'sophia'
   activeBy: saved.activeBy || {},                                     // each assistant remembers her/his own model
+  _at: saved._at || null,                                             // when these settings last changed (sync: newest wins)
   council: saved.council || config.council || [],
   extra: saved.extra || [],           // models added by voice ("switch to llama")
 };
 let pendingRule = null;               // a checked Lina rule waiting for "confirm"
-function saveState() {
+// Supabase sync (../hands/sync.js): settings, Lina rules and voice choices follow Mark to any computer
+let sync = null;
+for (const f of ['./sync.js', '../hands/sync.js']) { try { sync = require(f).create({ log: m => console.warn(m) }); break; } catch {} }
+if (!sync) sync = { on: false, status: { on: false }, pull: async () => ({}), push() {}, flush: async () => {} };
+const { newer } = (() => { try { return require('./sync.js'); } catch { try { return require('../hands/sync.js'); } catch { return { newer: () => false }; } } })();
+const SYNCED = s => ({ active: s.active, councilMode: s.councilMode, council: s.council, extra: s.extra, personality: s.personality, assistant: s.assistant, activeBy: s.activeBy });
+let prefs = { value: {}, updated_at: null };          // the browser's choices (voices, theme, eco...), see /api/prefs
+
+function saveState({ quiet = false } = {}) {
   try {
+    if (!quiet) state._at = new Date().toISOString();
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+    if (!quiet) sync.push('hud.state', SYNCED(state), state._at);
   } catch (e) { console.warn('could not save state:', e.message); }
+}
+
+// on start: take whatever is newer, this computer's copy or Supabase's
+async function syncOnStart() {
+  if (!sync.on) return;
+  const got = await sync.pull(['hud.state', 'hud.rules', 'hud.prefs']);
+  const st = got['hud.state'];
+  if (newer(st, state._at)) { Object.assign(state, st.value); state._at = st.updated_at; saveState({ quiet: true }); }
+  else if (state._at) sync.push('hud.state', SYNCED(state), state._at);
+  const ru = got['hud.rules']; let rulesAt = 0; try { rulesAt = fs.statSync(RULES_PATH).mtimeMs; } catch {}
+  if (newer(ru, rulesAt) && typeof ru.value === 'string') { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(RULES_PATH, ru.value); }
+  else if (rulesAt) sync.push('hud.rules', fs.readFileSync(RULES_PATH, 'utf8'), new Date(rulesAt).toISOString());
+  if (got['hud.prefs']) prefs = got['hud.prefs'];
 }
 const status = {};                    // id -> {state, ms, error, at}
 let localModels = [];                 // names from Ollama
@@ -524,6 +548,7 @@ function readRules() {
 }
 function saveRule(r) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  setTimeout(() => { try { sync.push('hud.rules', fs.readFileSync(RULES_PATH, 'utf8')); } catch {} }, 50);
   fs.appendFileSync(RULES_PATH, `# saved ${new Date().toISOString()} (fingerprint ${String(r.fingerprint).slice(0, 16)})\n# means: ${r.english}\n${r.text}\n`);
   return readRules().length;
 }
@@ -653,7 +678,7 @@ function json(res, code, obj) {
 function publicState() {
   return {
     active: state.active, councilMode: state.councilMode, personality: state.personality, assistant: state.assistant, assistantLabel: me(), council: state.council, fallback: config.fallback,
-    router: { online: routerOnline, url: ROUTER }, local: { online: localOnline, models: localModels },
+    router: { online: routerOnline, url: ROUTER }, local: { online: localOnline, models: localModels }, sync: sync.status,
     models: allModels(),
   };
 }
@@ -680,6 +705,14 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, publicState());
     }
     if (url.pathname === '/api/voices' && req.method === 'GET') return json(res, 200, await studioVoices());
+    if (url.pathname === '/api/prefs' && req.method === 'GET') return json(res, 200, { ...prefs, sync: sync.status });
+    if (url.pathname === '/api/prefs' && req.method === 'POST') {
+      const b = await readBody(req); const t = Date.parse(b.updated_at);
+      if (b.value && typeof b.value === 'object' && Number.isFinite(t) && (!prefs.updated_at || t > Date.parse(prefs.updated_at))) {
+        prefs = { value: b.value, updated_at: new Date(t).toISOString() }; sync.push('hud.prefs', prefs.value, prefs.updated_at);
+      }
+      return json(res, 200, { ok: true });
+    }
     if (url.pathname === '/api/tts' && req.method === 'POST') return studioSpeech(await readBody(req), res);
     if (url.pathname === '/api/command' && req.method === 'POST') {
       const b = await readBody(req);
@@ -711,7 +744,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-refreshHealth().finally(() => server.listen(PORT, () => {
+Promise.race([syncOnStart().catch(e => console.warn('sync:', e.message)), new Promise(r => setTimeout(r, 6000))])
+  .then(() => refreshHealth()).finally(() => server.listen(PORT, () => {
   console.log(`Jarvis HUD on http://localhost:${PORT}  (router ${ROUTER}, ollama ${OLLAMA})`);
 }));
 

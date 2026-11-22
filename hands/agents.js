@@ -16,14 +16,27 @@ const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS || 12);
 const ROUTER = (process.env.ROUTER_URL || 'http://127.0.0.1:8082').replace(/\/$/, '');
 const ROUTER_TOKEN = process.env.ROUTER_TOKEN || 'jarvis';
 
-function create({ home, workdir, run, openUrl, lockedReason, log }) {
+function create({ home, workdir, run, openUrl, lockedReason, log, sync = null }) {
   const FILE = path.join(home, 'agents.json');
   const RUNS = path.join(home, 'runs');
   fs.mkdirSync(RUNS, { recursive: true });
   const running = new Map();                                        // agent id -> run id
 
   const load = () => { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { return []; } };
-  const save = list => fs.writeFileSync(FILE, JSON.stringify(list, null, 2));
+  const save = (list, { quiet = false } = {}) => {
+    fs.writeFileSync(FILE, JSON.stringify(list, null, 2));
+    if (sync && !quiet) sync.push('hands.agents', list);              // the team follows Mark to any computer
+  };
+  // on start: if Supabase has a newer copy of the team (another computer changed it), use that one
+  if (sync && sync.on) sync.pull(['hands.agents']).then(items => {
+    const r = items['hands.agents']; let mtime = 0; try { mtime = fs.statSync(FILE).mtimeMs; } catch {}
+    const { newer } = require('./sync.js');
+    if (r && Array.isArray(r.value) && newer(r, mtime)) {
+      save(r.value, { quiet: true });
+      for (const a of r.value) fs.mkdirSync(folder(a), { recursive: true });
+      log({ action: 'sync', note: `team loaded from Supabase (${r.value.length} agents)` });
+    } else if (!r && load().length) sync.push('hands.agents', load());   // first time: upload what's here
+  });
   const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
   const folder = a => path.join(workdir, 'agents', a.id);
 
@@ -116,6 +129,7 @@ function create({ home, workdir, run, openUrl, lockedReason, log }) {
         if (rec.status === 'running') { rec.status = 'stopped'; rec.summary = rec.summary || `Stopped after ${MAX_STEPS} steps without finishing.`; }
       } catch (e) { rec.status = 'error'; rec.summary = 'Error: ' + e.message; }
       rec.finished = new Date().toISOString(); put(); running.delete(a.id);
+      if (sync) sync.pushRun(rec.id, a.id, rec);
       const list = load(); const x = list.find(y => y.id === a.id);
       if (x) { x.last_run = rec.id; x.last_status = rec.status; x.last_summary = rec.summary; x.last_at = rec.finished; save(list); }
     })();

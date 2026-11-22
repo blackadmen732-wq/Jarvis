@@ -95,7 +95,9 @@ const server = http.createServer(async (req, res) => {
     const id = url.searchParams.get('id');
     if (id) { const r = agents.getRun(id); return r ? send(200, { ok: true, run: r }) : send(404, { error: 'no such run' }); }
     const a = url.searchParams.get('agent'); const ag = a ? agents.find(a) : null;
-    return send(200, { ok: true, runs: agents.recentRuns(ag ? ag.id : null, 8) });
+    let runs = agents.recentRuns(ag ? ag.id : null, 8);
+    if (!runs.length && ag && agents.sync.on) runs = (await agents.sync.pullRuns(ag.id, 8)).reverse();   // new computer: history from Supabase
+    return send(200, { ok: true, runs });
   }
   if (req.method !== 'POST' || !/^application\/json\b/i.test(String(req.headers['content-type'] || ''))) return send(400, { error: 'JSON POST only' });
   const b = await readBody(req);
@@ -127,9 +129,12 @@ const server = http.createServer(async (req, res) => {
 
 if (require.main === module) {
   start();
-  agents = require('./agents.js').create({ home: HOME, workdir: WORKDIR, run, openUrl, lockedReason, log });
+  const sync = require('./sync.js').create({ log: note => log({ action: 'sync', note }) });
+  agents = require('./agents.js').create({ home: HOME, workdir: WORKDIR, run, openUrl, lockedReason, log, sync });
+  agents.sync = sync;
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`\n  Jarvis Hands is on (http://127.0.0.1:${PORT}). Work folder: ${WORKDIR}`);
+    console.log(`  Sync with Supabase: ${agents.sync.on ? 'on' : 'off (add JARVIS_SYNC_TOKEN to .env to turn it on)'}`);
     console.log(`  Pairing code: ${TOKEN}`);
     console.log(`  In the HUD, type:  hands code ${TOKEN}`);
     console.log('  Agents and routines run here while this window is open. Ctrl+C turns Hands (and all agents) off.\n');
