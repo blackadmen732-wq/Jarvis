@@ -636,7 +636,8 @@ async function studioSpeech(body, res) {
 }
 
 // ---------------------------------------------------------------- http
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json',
+  '.jpg': 'image/jpeg', '.webmanifest': 'application/manifest+json' };
 
 function readBody(req) {
   return new Promise((resolve) => {

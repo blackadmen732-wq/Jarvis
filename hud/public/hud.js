@@ -496,7 +496,11 @@
       return false;
     }
   }
-  handsConnect(true);
+  // opened by the Jarvis app launcher (scripts/jarvis-launch.sh): it passes the pairing code in the address, so Mark
+  // never has to type it. The code is stored, then removed from the address bar.
+  const fromLauncher = location.hash.match(/hands=([a-f0-9]{12})/);
+  if (fromLauncher) { handsToken = fromLauncher[1]; store.set('handsToken', handsToken); window.history.replaceState(null, '', location.pathname + location.search); }
+  handsConnect(!fromLauncher);
   async function handsRun(step) {
     try {
       if (step.action === 'open') { await handsFetch('/open', { url: step.url }); addMsg('sys', 'Jarvis', `Opened ${step.url}`); return null; }

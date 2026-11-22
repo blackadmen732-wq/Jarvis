@@ -57,6 +57,16 @@ You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) insta
 
 **Check it works:** click the model dropdown at the top. You should see a long list of models. Pick one ending in `:free` and say hi.
 
+### Make Jarvis an app (no terminal after this)
+
+Run this **once**:
+```bash
+./scripts/install-app.sh
+```
+A **Jarvis** app appears in your app launcher (on a Chromebook: in the **Linux apps** folder). Right-click it → **Pin to shelf**. From then on, click the icon: it starts Jarvis and Jarvis Hands in the background if they aren't running, waits until Jarvis is ready, and opens it, already connected to Hands (no pairing code to type). If anything goes wrong, the details are in `~/.jarvis-hands/launch.log`. To remove the icon: `./scripts/install-app.sh remove`.
+
+Want it in its own window instead of a browser tab? In Chrome, click the **Install** icon in the address bar (or **⋮ → Cast, save and share → Install page as app**).
+
 ## 2. Switch models
 
 ![The hub with the model dropdown filtered to free models](docs/hub-screenshot.png)
