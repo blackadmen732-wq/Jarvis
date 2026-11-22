@@ -24,7 +24,7 @@ Your own AI hub. Switch between **free models**, **paid models** and **your own 
 | Your own models | Runs downloaded or uploaded models on your machine | [ollama/ollama](https://github.com/ollama/ollama) |
 | Jarvis | Always-listening desktop voice assistant (Mac, Windows, Linux) | [isair/jarvis](https://github.com/isair/jarvis) |
 | Router | Lets Claude Code & other coding agents use free, local and uncensored models, with automatic fallback | [Alishahryar1/free-claude-code](https://github.com/Alishahryar1/free-claude-code) |
-| **Jarvis HUD** | Holographic voice interface: talk to Jarvis, see live routes to every model, switch models by voice, run an AI council | Built for this project (`hud/`) |
+| **Jarvis HUD** | Holographic voice interface: talk to Jarvis, see live routes to every model, switch models by voice, run an AI council | Built for this project (`hud/`) on [three.js](https://github.com/mrdoob/three.js) + [pmndrs/postprocessing](https://github.com/pmndrs/postprocessing) |
 
 ![Jarvis HUD in council mode](docs/hud-council.jpg)
 
@@ -243,12 +243,14 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
   | speaking | **Plasma Orb**: bright heart with electric veins |
   | council speaking | **Liquid Glass**: a shimmering glass blob |
 
-  You can also lock any core: **Black Hole** (real light-bending, glowing accretion disk, planets orbiting, your models circle it like satellites), **Sun** (boiling surface, bright limb, looping prominences), **Circuit Sphere**, **Pulse**, **Plasma**, **Portal**, **Liquid**, **Reactor**, **Neural Brain**, **Data Stream**. Say *"black hole mode"*, *"plasma core"*, *"make the core a sun"*, or *"auto mode"* to go back. The last core you lock becomes the idle core in Auto.
+  You can also lock any core: **Bloom** (thousands of shimmering fibres forming slowly turning petals), **Black Hole** (real light-bending, glowing accretion disk, planets orbiting, your models circle it like satellites), **Sun** (boiling surface, bright limb, looping prominences), **Circuit Sphere**, **Pulse**, **Plasma**, **Portal**, **Liquid**, **Reactor**, **Neural Brain**, **Data Stream**. Say *"black hole mode"*, *"plasma core"*, *"make the core a sun"*, or *"auto mode"* to go back. The last core you lock becomes the idle core in Auto.
 - **● Colour** cycles the theme: Amber, Ice (blue), Violet, Crimson, Emerald, Gold. Everything follows: core, disk, sun, panels. Or say *"change colour to blue"*.
 - **The live connection to your active model:**
   - warm colours (Amber, Gold, Crimson): a **solar flare** rises from the core, arcs out and loops around the model you're using. Switch models and a new flare grows toward the new one.
   - cool colours (Ice, Violet, Emerald): crackling **plasma lightning** from the core to the model.
   - the Neural Links panel marks it **⚡ linked** with a moving plasma bar.
+- **The backdrop is the real Milky Way** (ESO's panorama photo). In Black Hole mode the hole actually bends it: stars swirl around the edge and a thin photon ring appears.
+- **Control-room readouts** around the core show live data: core form and state, the linked model and provider, latency, how many links work, uptime, and Signal / Links gauges.
 - **Holo** shows/hides the holographic layer: gear-toothed machine rings turning around the core, wireframe drones orbiting and firing scan beams, and a radar sweep on the floor. Say *"hide the holograms"* / *"show the holograms"*.
 
 ![Black hole with a solar flare to the active model](docs/hud-blackhole.jpg)
@@ -263,7 +265,7 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 | "Status" | Which model is active, what's online |
 | "List models" | Reads out your models |
 | "Use a female voice" / "switch voice to George" | Changes Jarvis's voice |
-| "Auto mode" / "black hole mode" / "sun mode" / "plasma core" / "circuit sphere" | Change the core |
+| "Auto mode" / "black hole mode" / "sun mode" / "bloom mode" / "plasma core" / "circuit sphere" | Change the core |
 | "Change colour to blue" / "purple theme" | Change the colour theme |
 | "Hide the holograms" / "show the holograms" | Holographic layer on/off |
 | "Switch to Qwen 7B" / "use the coder" / "use vision" | Your local uncensored models |
@@ -304,3 +306,11 @@ docker compose logs -f open-webui             # see what's going on
 | HUD mic does nothing | Use Chrome or Edge, open it as `http://localhost:3001` (not an IP address), and allow the microphone in the address bar. |
 | HUD shows "Router offline" | `docker compose ps` and `docker compose logs router`. Usually a mistake in `.env`. |
 | A node turns red with "key missing" | Add that provider's key to `.env`, then `docker compose up -d router`. |
+
+---
+
+## Credits
+
+- Milky Way panorama: ESO/S. Brunier, [CC BY 4.0](https://www.eso.org/public/images/eso0932a/) (`hud/public/assets/`)
+- [three.js](https://github.com/mrdoob/three.js) (MIT) and [postprocessing](https://github.com/pmndrs/postprocessing) (zlib), stored in `hud/public/vendor/`
+- Studio voices: [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) (Apache-2.0); router: [free-claude-code](https://github.com/Alishahryar1/free-claude-code) (AGPL-3.0)

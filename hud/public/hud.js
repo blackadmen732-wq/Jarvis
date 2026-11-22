@@ -777,9 +777,9 @@
     if (announce) { const m = on ? 'Holographic systems online.' : 'Holograms offline.'; addMsg('sys', 'Jarvis', m); speakText(m); }
   }
   $('#t-holo').addEventListener('click', () => setHolo(!holoOn, false));
-  const SCENE_NAMES = { auto: 'Auto core', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit Sphere', pulse: 'Pulse Sphere', plasma: 'Plasma Orb', portal: 'Warp Portal', liquid: 'Liquid Glass', reactor: 'Reactor', brain: 'Neural Brain', stream: 'Data Stream' };
-  const SCENE_SHORT = { auto: 'Auto', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit', pulse: 'Pulse', plasma: 'Plasma', portal: 'Portal', liquid: 'Liquid', reactor: 'Reactor', brain: 'Brain', stream: 'Stream' };
-  const HOME_OK = ['blackhole', 'sun', 'circuit', 'pulse', 'plasma', 'portal', 'liquid', 'reactor'];
+  const SCENE_NAMES = { auto: 'Auto core', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit Sphere', pulse: 'Pulse Sphere', plasma: 'Plasma Orb', portal: 'Warp Portal', liquid: 'Liquid Glass', bloom: 'Bloom', reactor: 'Reactor', brain: 'Neural Brain', stream: 'Data Stream' };
+  const SCENE_SHORT = { auto: 'Auto', blackhole: 'Black Hole', sun: 'Sun', circuit: 'Circuit', pulse: 'Pulse', plasma: 'Plasma', portal: 'Portal', liquid: 'Liquid', bloom: 'Bloom', reactor: 'Reactor', brain: 'Brain', stream: 'Stream' };
+  const HOME_OK = ['blackhole', 'sun', 'circuit', 'pulse', 'plasma', 'portal', 'liquid', 'bloom', 'reactor'];
   function setScene(name, announce) {
     if (!SCENE_NAMES[name]) return;
     sceneName = name; store.set('scene2', name);
@@ -904,4 +904,28 @@
     fx: name => fx(name),
   };
   dispatchEvent(new Event('jarvis-ready'));
+
+  // ---- control-room readouts: real data, refreshed a few times a second
+  const t0Up = Date.now(), bars = $('#ro-bars');
+  if (bars) for (let i = 0; i < 24; i++) bars.appendChild(document.createElement('i'));
+  const setGauge = (id, k, txt) => { const c = $(id); if (c) c.style.strokeDashoffset = (163.4 * (1 - Math.max(0, Math.min(1, k)))).toFixed(1); const t = $(id + '-t'); if (t) t.textContent = txt; };
+  function updateReadouts() {
+    if (!$('#ro-core')) return;
+    const sc = sceneName === 'auto' ? `AUTO · ${(SCENE_SHORT[homeCore] || 'CORE').toUpperCase()}` : (SCENE_SHORT[sceneName] || sceneName).toUpperCase();
+    $('#ro-core').textContent = sc;
+    $('#ro-state').textContent = ({ idle: 'STANDBY', listening: 'LISTENING', thinking: 'ROUTING', speaking: 'TRANSMITTING' })[uiState] || uiState.toUpperCase();
+    $('#ro-field').textContent = (level * 9.81).toFixed(2) + ' T';
+    const s = Math.floor((Date.now() - t0Up) / 1000); $('#ro-up').textContent = [s / 3600, s / 60 % 60, s % 60].map(x => String(Math.floor(x)).padStart(2, '0')).join(':');
+    bars && [...bars.children].forEach((b, i) => { const v = levelHist[levelHist.length - 24 + i] || 0; b.style.height = (2 + v * 20).toFixed(0) + 'px'; });
+    const a = S.models.find(m => m.id === S.active);
+    $('#ro-link').textContent = a ? a.label.toUpperCase() : '—';
+    $('#ro-via').textContent = a ? a.group.toUpperCase() : '—';
+    $('#ro-lat').textContent = a && a.status && a.status.ms ? (a.status.ms / 1000).toFixed(2) + ' s' : '—';
+    const inst = S.models.filter(m => m.installed).length, okN = S.models.filter(m => m.status.state === 'ok').length;
+    $('#ro-nodes').textContent = `${okN} OK / ${inst}`;
+    const hex = $('#ro-hex'); if (hex && Math.random() < 0.3) hex.textContent = Array.from({ length: 3 }, () => Array.from({ length: 4 }, () => Math.floor(Math.random() * 65536).toString(16).toUpperCase().padStart(4, '0')).join(' ')).join('\n');
+    setGauge('#g-signal', level, Math.round(level * 100));
+    setGauge('#g-links', inst ? okN / inst : 0, `${okN}/${inst}`);
+  }
+  setInterval(updateReadouts, 250);
 })();

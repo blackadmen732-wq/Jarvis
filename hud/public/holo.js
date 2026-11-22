@@ -60,7 +60,7 @@ export function createHolo(scene, glow, { mobile = false } = {}) {
     const beamGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
     const beamMat = mat(0, 'plasma'); const beam = new THREE.Line(beamGeo, beamMat); beam.frustumCulled = false; root.add(beam);
     const trailPts = 60, trailGeo = new THREE.BufferGeometry(); trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(trailPts * 3), 3));
-    const trail = new THREE.Line(trailGeo, mat(0.18)); trail.frustumCulled = false; root.add(trail);
+    const trail = new THREE.Line(trailGeo, mat(0.18)); trail.frustumCulled = false; trail.visible = false;   // trails removed: they streak across the screen near the camera
     return { g, wire, inner, coreDot, beam, beamMat, trail, trailPts, hist: [],
       r: 5.2 + i * 0.55, inc: (i - 2) * 0.32, speed: 0.16 + (i % 3) * 0.05, phase: i * 1.3, scanT: 1 + i, scanLife: 0 };
   });
@@ -106,7 +106,8 @@ export function createHolo(scene, glow, { mobile = false } = {}) {
       d.wire.rotation.x += dt * 0.6; d.wire.rotation.y += dt * 0.9; d.inner.rotation.y -= dt * 2;
       d.coreDot.material.opacity = (0.55 + 0.4 * Math.sin(t * 4 + d.phase)) * vis;
       // trail
-      d.hist.unshift(d.g.position.clone()); if (d.hist.length > d.trailPts) d.hist.pop();
+      d.acc = (d.acc || 0) + dt;
+      if (d.acc >= 1 / 30 || !d.hist.length) { d.acc = 0; d.hist.unshift(d.g.position.clone()); if (d.hist.length > d.trailPts) d.hist.pop(); }
       const arr = d.trail.geometry.attributes.position.array;
       for (let i = 0; i < d.trailPts; i++) { const p = d.hist[Math.min(i, d.hist.length - 1)]; arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z; }
       d.trail.geometry.attributes.position.needsUpdate = true;

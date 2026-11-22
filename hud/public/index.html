@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Jarvis OS</title>
   <meta name="theme-color" content="#030508">
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -17,7 +18,7 @@
 
   <header class="top">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"></span>
+      <img class="brand-logo" src="assets/logo.svg" alt="" aria-hidden="true">
       <div>
         <div class="brand-name">J.A.R.V.I.S</div>
         <div class="brand-sub">Jarvis OS · Neural Router</div>
@@ -46,6 +47,32 @@
       <div class="msg sys"><div class="who">Jarvis</div><div class="text">Systems online. Say "Jarvis" or tap the mic. Try: "switch to Groq", "start the council", or "status".</div></div>
     </div>
   </aside>
+
+  <!-- control-room readouts around the core (live data) -->
+  <div class="readout ro-tl" aria-hidden="true">
+    <div class="ro-title">CORE TELEMETRY</div>
+    <div class="ro-row"><span>FORM</span><b id="ro-core">—</b></div>
+    <div class="ro-row"><span>STATE</span><b id="ro-state">STANDBY</b></div>
+    <div class="ro-row"><span>FIELD</span><b id="ro-field">0.00</b></div>
+    <div class="ro-row"><span>UPTIME</span><b id="ro-up">00:00:00</b></div>
+    <div class="ro-bars" id="ro-bars"></div>
+  </div>
+  <div class="readout ro-tr" aria-hidden="true">
+    <div class="ro-title">ROUTING MATRIX</div>
+    <div class="ro-row"><span>LINK</span><b id="ro-link">—</b></div>
+    <div class="ro-row"><span>VIA</span><b id="ro-via">—</b></div>
+    <div class="ro-row"><span>LATENCY</span><b id="ro-lat">—</b></div>
+    <div class="ro-row"><span>NODES</span><b id="ro-nodes">—</b></div>
+    <div class="ro-hex" id="ro-hex"></div>
+  </div>
+  <div class="readout ro-bl" aria-hidden="true">
+    <svg class="gauge" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" class="g-bg"/><circle cx="32" cy="32" r="26" class="g-fg" id="g-signal"/><text x="32" y="36" id="g-signal-t">0</text></svg>
+    <div class="g-label">SIGNAL</div>
+  </div>
+  <div class="readout ro-br" aria-hidden="true">
+    <svg class="gauge" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" class="g-bg"/><circle cx="32" cy="32" r="26" class="g-fg" id="g-links"/><text x="32" y="36" id="g-links-t">0</text></svg>
+    <div class="g-label">LINKS OK</div>
+  </div>
 
   <div class="status-line" id="status-line">
     <div class="state-label" id="state-label">Standby</div>

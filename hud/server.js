@@ -129,11 +129,11 @@ async function resolveModel(query) {
 function parseCommand(text) {
   const t = norm(text).replace(/^(hey |ok |okay )?jarvis\s*/, '');
   let m;
-  if ((m = t.match(/^(?:switch to |go to |activate |enter |show |show me |open |change to |switch scene to |change scene to )?(?:the )?(auto|automatic|adaptive|black hole|blackhole|singularity|sun|star|solar|circuit|circuit sphere|pulse|pulse sphere|spike|plasma|plasma orb|plasma ball|portal|warp|warp portal|vortex|liquid|liquid glass|glass|neural brain|brain|neural|data stream|stream|data flow|flow|reactor|normal|default|classic)(?: mode| scene| view| core| sphere)$/)) ||
-      (m = t.match(/^(?:switch|change|set) (?:the )?scene (?:to )?(auto|black hole|blackhole|sun|circuit|pulse|plasma|portal|liquid|neural brain|brain|neural|data stream|stream|reactor|normal|default)$/)) ||
+  if ((m = t.match(/^(?:switch to |go to |activate |enter |show |show me |open |change to |switch scene to |change scene to )?(?:the )?(auto|automatic|adaptive|black hole|blackhole|singularity|sun|star|solar|circuit|circuit sphere|pulse|pulse sphere|spike|plasma|plasma orb|plasma ball|portal|warp|warp portal|vortex|liquid|liquid glass|glass|bloom|flower|neural brain|brain|neural|data stream|stream|data flow|flow|reactor|normal|default|classic)(?: mode| scene| view| core| sphere)$/)) ||
+      (m = t.match(/^(?:switch|change|set) (?:the )?scene (?:to )?(auto|black hole|blackhole|sun|circuit|pulse|plasma|portal|liquid|bloom|flower|neural brain|brain|neural|data stream|stream|reactor|normal|default)$/)) ||
       (m = t.match(/^(?:make|turn|change)(?: the)? (?:core|center|centre|middle)(?: into| to)?(?: a| the)? (black hole|sun|star|reactor|brain|circuit|plasma|portal|liquid|pulse)$/))) {
     const k = m[1];
-    return { action: 'scene', scene: /auto|adaptive/.test(k) ? 'auto' : /circuit/.test(k) ? 'circuit' : /pulse|spike/.test(k) ? 'pulse' : /plasma/.test(k) ? 'plasma' : /portal|warp|vortex/.test(k) ? 'portal' : /liquid|glass/.test(k) ? 'liquid' : /black ?hole|singularity/.test(k) ? 'blackhole' : /sun|star|solar/.test(k) ? 'sun' : /brain|neural/.test(k) ? 'brain' : /stream|flow/.test(k) ? 'stream' : 'reactor' };
+    return { action: 'scene', scene: /auto|adaptive/.test(k) ? 'auto' : /circuit/.test(k) ? 'circuit' : /pulse|spike/.test(k) ? 'pulse' : /plasma/.test(k) ? 'plasma' : /portal|warp|vortex/.test(k) ? 'portal' : /liquid|glass/.test(k) ? 'liquid' : /bloom|flower/.test(k) ? 'bloom' : /black ?hole|singularity/.test(k) ? 'blackhole' : /sun|star|solar/.test(k) ? 'sun' : /brain|neural/.test(k) ? 'brain' : /stream|flow/.test(k) ? 'stream' : 'reactor' };
   }
   if ((m = t.match(/^(?:change|switch|set|make|turn)(?: the| your| my)? (?:colou?rs?|theme)(?: to| into)? (\w+)$/)) || (m = t.match(/^(?:go |use |make it )?(\w+) (?:colou?rs?|theme)$/))) {
     const c = m[1];
