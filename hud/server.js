@@ -783,6 +783,31 @@ const CLOUD_VOICES = [
   { id: 'fish_jarvis', name: 'Jarvis (Fish Audio, cloud)', accent: 'British', gender: 'male', grade: 'cloud', cloud: true },
   { id: 'fish_sophia', name: 'Sophia (Fish Audio, cloud)', accent: 'American', gender: 'female', grade: 'cloud', cloud: true },
 ];
+// Mark's own ElevenLabs voices (designed for him in ElevenLabs: Sophia + Jarvis). Need ELEVENLABS_API_KEY (Keys form)
+// and the voice ids in models.json tts.elevenlabs. Uses his ElevenLabs credits (about 1 credit per character on flash).
+const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY || '';
+function elevenVoices() {
+  const ids = (config.tts && config.tts.elevenlabs) || {};
+  if (!ELEVEN_KEY) return [];
+  return [
+    ids.jarvis && { id: 'el_jarvis', name: 'Jarvis (ElevenLabs)', accent: 'British', gender: 'male', grade: 'cloud', cloud: true },
+    ids.sophia && { id: 'el_sophia', name: 'Sophia (ElevenLabs)', accent: 'American', gender: 'female', grade: 'cloud', cloud: true },
+  ].filter(Boolean);
+}
+const cloudList = () => [...(OPENROUTER_KEY ? CLOUD_VOICES : []), ...elevenVoices()];
+async function elevenSpeech(voice, text, speed, res) {
+  const el = (config.tts && config.tts.elevenlabs) || {}, id = el[voice.replace(/^el_/, '')];
+  if (!ELEVEN_KEY || !id) return json(res, 503, { error: 'ElevenLabs voices need ELEVENLABS_API_KEY (Keys form) and the voice ids in models.json' });
+  const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(id)}?output_format=mp3_44100_128`, {
+    method: 'POST', signal: AbortSignal.timeout(60e3),
+    headers: { 'content-type': 'application/json', 'xi-api-key': ELEVEN_KEY, accept: 'audio/mpeg' },
+    body: JSON.stringify({ text, model_id: el.model || 'eleven_flash_v2_5',
+      voice_settings: { stability: 0.45, similarity_boost: 0.8, speed: Math.min(1.2, Math.max(0.7, speed)) } }),
+  });
+  if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); m = (j.detail && (j.detail.message || j.detail)) || m; } catch {} throw new Error(String(m)); }
+  const buf = Buffer.from(await r.arrayBuffer());
+  res.writeHead(200, { 'content-type': 'audio/mpeg', 'cache-control': 'no-store', 'content-length': buf.length }); res.end(buf);
+}
 async function cloudSpeech(voice, text, speed, res) {
   const tts = config.tts || {}, model = tts.model || 'fish-audio/s2.1-pro-free:free';
   if (!OPENROUTER_KEY) return json(res, 503, { error: 'cloud voices need OPENROUTER_API_KEY in .env' });
@@ -799,7 +824,7 @@ async function cloudSpeech(voice, text, speed, res) {
 }
 
 async function studioVoices() {
-  if (Date.now() - voiceCache.at < 60e3 && voiceCache.list.length) return { online: true, voices: OPENROUTER_KEY ? [...voiceCache.list, ...CLOUD_VOICES] : voiceCache.list };
+  if (Date.now() - voiceCache.at < 60e3 && voiceCache.list.length) return { online: true, voices: [...voiceCache.list, ...cloudList()] };
   try {
     const r = await fetch(KOKORO + '/v1/audio/voices', { signal: AbortSignal.timeout(4000) });
     const j = await r.json();
@@ -810,14 +835,17 @@ async function studioVoices() {
       accent: ACCENTS[v.id[0]] || v.id[0], gender: v.id[1] === 'f' ? 'female' : 'male', grade: v.grade || '',
     })).sort((x, y) => rank(x.grade) - rank(y.grade) || x.id.localeCompare(y.id));
     voiceCache = { at: Date.now(), list };
-    return { online: true, voices: OPENROUTER_KEY ? [...list, ...CLOUD_VOICES] : list };
-  } catch { return OPENROUTER_KEY ? { online: true, voices: CLOUD_VOICES } : { online: false, voices: [] }; }
+    return { online: true, voices: [...list, ...cloudList()] };
+  } catch { const c = cloudList(); return c.length ? { online: true, voices: c } : { online: false, voices: [] }; }
 }
 async function studioSpeech(body, res) {
   const text = String(body.text || '').slice(0, 1200).trim();
   const voice = String(body.voice || 'bm_george').replace(/[^a-z0-9_+()., ]/gi, '').slice(0, 80);
   const speed = Math.min(1.6, Math.max(0.6, Number(body.speed) || 1));
   if (!text) { res.writeHead(400); return res.end(); }
+  if (/^el_(jarvis|sophia)$/.test(voice)) {
+    try { return await elevenSpeech(voice, text, speed, res); } catch (e) { return json(res, 502, { error: 'ElevenLabs voice failed: ' + e.message }); }
+  }
   if (/^fish_(jarvis|sophia)$/.test(voice)) {
     try { return await cloudSpeech(voice, text, speed, res); } catch (e) { return json(res, 502, { error: 'cloud voice failed: ' + e.message }); }
   }

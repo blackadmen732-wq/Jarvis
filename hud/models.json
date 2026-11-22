@@ -423,6 +423,12 @@
     "_help": "free natural voices through OpenRouter (Fish Audio). Each spoken reply uses one OpenRouter request.",
     "model": "fish-audio/s2.1-pro-free:free",
     "jarvis": "Speak as Jarvis: a calm, witty, confident British man in his thirties, warm low voice, natural pace.",
-    "sophia": "Speak as Sophia: a warm, playful, confident young woman, bright expressive voice, natural pace, a little teasing."
+    "sophia": "Speak as Sophia: a warm, playful, confident young woman, bright expressive voice, natural pace, a little teasing.",
+    "elevenlabs": {
+      "_help": "Mark's own voices designed in ElevenLabs. Used when ELEVENLABS_API_KEY is set (Keys form). Costs ElevenLabs credits.",
+      "model": "eleven_flash_v2_5",
+      "jarvis": "",
+      "sophia": ""
+    }
   }
 }

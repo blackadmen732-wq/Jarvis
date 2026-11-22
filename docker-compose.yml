@@ -97,6 +97,7 @@ services:
       KOKORO_URL: http://voice:8880
       LINA_URL: http://lina:8090
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}   # only for the optional Fish Audio cloud voices
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}   # Mark's ElevenLabs voices for Jarvis and Sophia (optional)
       JARVIS_SYNC_TOKEN: ${JARVIS_SYNC_TOKEN:-}     # Supabase sync (empty = off); same value as the Supabase secret
     volumes:
       - ./hud/models.json:/app/models.json:ro          # edit favourites, then restart hud

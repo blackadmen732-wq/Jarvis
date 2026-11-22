@@ -608,6 +608,7 @@
     ['GEMINI_API_KEY', 'Gemini (free, small)', 'https://aistudio.google.com/apikey'],
     ['NVIDIA_NIM_API_KEY', 'NVIDIA (Nemotron, Kimi)', 'https://build.nvidia.com/settings/api-keys'],
     ['ZAI_API_KEY', 'Z.ai (GLM)', 'https://z.ai/manage-apikey/apikey-list'],
+    ['ELEVENLABS_API_KEY', 'ElevenLabs (Jarvis and Sophia voices)', 'https://elevenlabs.io/app/settings/api-keys'],
     ['JARVIS_SYNC_TOKEN', 'Supabase sync code (your own random code)', ''],
   ];
   async function openKeys() {
@@ -786,7 +787,9 @@
   let assistant = store.get('assistant', 'jarvis');
   function saveVoiceFor() { store.set('voice.' + assistant, { engine, studioVoice, voiceName }); }
   function defaultVoiceFor(name) {
-    // default to voices that cost nothing: Kokoro (if running) or the browser's own; cloud voices only when Mark picks them
+    // Mark's own ElevenLabs voice first (he asked for it), else voices that cost nothing: Kokoro or the browser's own
+    const el = studio.online && studio.voices.find(v => v.id === 'el_' + (name === 'sophia' ? 'sophia' : 'jarvis'));
+    if (el) return { engine: 'studio', studioVoice: el.id, voiceName: null };
     const local = studio.online ? studio.voices.filter(v => !v.cloud) : [];
     if (name !== 'sophia') { const g = local.find(v => v.id === 'bm_george') || local.find(v => v.gender === 'male'); return { engine: g ? 'studio' : 'browser', studioVoice: g ? g.id : 'bm_george', voiceName: null }; }
     const sv = local.find(v => v.id === 'af_heart') || local.find(v => v.gender === 'female');
@@ -810,6 +813,13 @@
   async function loadStudioVoices() {
     try { studio = await (await fetch('/api/voices')).json(); } catch { studio = { online: false, voices: [] }; }
     if (!studio.online && engine === 'studio') engine = 'browser';
+    // the first time Mark's ElevenLabs voices show up, switch both assistants to them once (he can still pick another)
+    if (studio.voices.some(v => /^el_/.test(v.id)) && !store.get('elAdopted', false)) {
+      store.set('elAdopted', true);
+      for (const n of ['jarvis', 'sophia']) store.set('voice.' + n, defaultVoiceFor(n));
+      const v = defaultVoiceFor(assistant); engine = v.engine; studioVoice = v.studioVoice;
+      store.set('engine', engine); store.set('studioVoice', studioVoice);
+    }
     renderVoices();
   }
   function studioFetch(text) {
@@ -829,7 +839,7 @@
     if (engine !== 'studio' && !synth) return;
     const parts = plain(text).match(/[^.!?]+[.!?]*\s*/g) || [];
     let chunk = '';
-    const limit = engine === 'studio' && /^fish_/.test(studioVoice) ? 1200 : 220;   // cloud voices: one request per reply (daily limit)
+    const limit = engine === 'studio' && /^(fish|el)_/.test(studioVoice) ? 1200 : 220;   // cloud voices: one request per reply (daily limit)
     for (const p of parts) { if ((chunk + p).length > limit) { speechQueue.push(chunk); chunk = ''; } chunk += p; }
     if (chunk.trim()) speechQueue.push(chunk);
     // studio voices: start generating audio for every chunk right away so playback is gapless

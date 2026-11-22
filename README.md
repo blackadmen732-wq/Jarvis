@@ -361,6 +361,8 @@ Jarvis doesn't make you pick a model. The **Auto Router** looks at each request,
 
 **Cloud voices (optional):** with an OpenRouter key, the Voice Studio also offers **Jarvis** and **Sophia** voices from Fish Audio's free model, described in words in `hud/models.json` (`"tts"`). They sound natural and need nothing installed, which suits a Chromebook, but each spoken reply uses one of OpenRouter's daily free requests. Chrome's own voices stay free and unlimited, and they're the default.
 
+**Your ElevenLabs voices:** Jarvis and Sophia each have their own voice, designed in ElevenLabs (a calm British Jarvis, a sweet, bright Sophia). Press **KEYS**, paste your ElevenLabs API key (elevenlabs.io → Settings → API Keys), and save. Jarvis restarts itself, and both assistants switch to their ElevenLabs voices on their own. Each spoken reply uses ElevenLabs credits (about 1 credit per character). To go back to a free voice, pick one in the Voice Studio. The voice ids live in `hud/models.json` → `tts` → `elevenlabs`.
+
 ### Sophia and Jarvis: two assistants
 
 Jarvis has a partner: **Sophia**. Same Grok-style personality ([`jarvis/sophia-persona.md`](jarvis/sophia-persona.md)), her own female voice, and her own model.
