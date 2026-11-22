@@ -87,12 +87,14 @@ const BH_FRAG = /* glsl */`
       if (alpha > 0.985) break;
       if (r > 45.0 && dot(pos, vel) > 0.0) break;
     }
-    if (!captured) col += (1.0 - alpha) * sky(normalize(vel));
+    // the sky is drawn separately (unbent, as Mark asked): here only the hole, disk and ring
+    if (captured) alpha = 1.0;
     // photon ring: light that skimmed the photon sphere (r = 1.5) on its way to us
-    float ring = exp(-pow((rmin - 1.53) / 0.035, 2.0));
-    col += uHot * ring * (captured ? 0.0 : 1.0) * (1.2 + uLevel);
+    float ring = exp(-pow((rmin - 1.53) / 0.035, 2.0)) * (captured ? 0.0 : 1.0);
+    col += uHot * ring * (1.2 + uLevel);
+    alpha = clamp(alpha + ring * 0.6, 0.0, 1.0);
     // thin bright photon ring glow from rays that skimmed the hole
-    gl_FragColor = vec4(col * uVis, 1.0);
+    gl_FragColor = vec4(col * uVis, alpha * uVis);
   }`;
 
 export function createBlackHole(scene, renderer, camera, { mobile = false, reduce = false, sky = null } = {}) {
@@ -117,6 +119,7 @@ export function createBlackHole(scene, renderer, camera, { mobile = false, reduc
   // background quad in the main scene that shows the black hole buffer
   const bgMat = new THREE.ShaderMaterial({
     uniforms: { uTex: { value: target.texture } }, depthTest: false, depthWrite: false,
+    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,   // premultiplied: sky shows through
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 1.0, 1.0); }',
     fragmentShader: 'uniform sampler2D uTex; varying vec2 vUv; void main(){ gl_FragColor = texture2D(uTex, vUv); }',
   });
@@ -146,9 +149,9 @@ export function createBlackHole(scene, renderer, camera, { mobile = false, reduc
         gl_FragColor = vec4(col * uVis, uVis); }`,
   });
   const bodies = [
-    { r: 0.32, orbit: 6.4, speed: 0.11, phase: 0.6, mat: planetMat('#3a3530', '#8a7a68', 0) },
-    { r: 0.72, orbit: 11.5, speed: 0.045, phase: 2.4, mat: planetMat('#a8693a', '#f0d2a0', 1), ring: true },
-    { r: 0.2, orbit: 8.8, speed: 0.075, phase: 4.2, mat: planetMat('#7d8ea8', '#d8e4f0', 0) },
+    { r: 0.3, orbit: 6.0, speed: 0.11, phase: 0.6, mat: planetMat('#3a3530', '#8a7a68', 0) },
+    { r: 0.62, orbit: 7.6, speed: 0.06, phase: 2.4, mat: planetMat('#a8693a', '#f0d2a0', 1), ring: true },   // kept well away from the camera
+    { r: 0.2, orbit: 9.0, speed: 0.045, phase: 4.2, mat: planetMat('#7d8ea8', '#d8e4f0', 0) },
   ].map(b => {
     const m = new THREE.Mesh(new THREE.SphereGeometry(b.r, 48, 32), b.mat); orbitFrame.add(m);
     if (b.ring) {
@@ -186,7 +189,10 @@ export function createBlackHole(scene, renderer, camera, { mobile = false, reduc
     bhMat.uniforms.uCamWorld.value.copy(camera.matrixWorld);
     bhMat.uniforms.uCamPos.value.copy(camera.position);
     const prev = renderer.getRenderTarget();
-    renderer.setRenderTarget(target); renderer.render(bhScene, bhCam); renderer.setRenderTarget(prev);
+    const cc = renderer.getClearColor(new THREE.Color()), ca = renderer.getClearAlpha();
+    renderer.setClearColor(0x000000, 0);
+    renderer.setRenderTarget(target); renderer.clear(); renderer.render(bhScene, bhCam); renderer.setRenderTarget(prev);
+    renderer.setClearColor(cc, ca);
     for (const b of bodies) {
       const a = b.phase + t * b.speed;
       b.mesh.position.set(Math.cos(a) * b.orbit, 0, Math.sin(a) * b.orbit);

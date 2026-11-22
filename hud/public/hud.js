@@ -411,11 +411,41 @@
   }
   function switchTo(id) {
     if (id === S.active) return;
-    const m = S.models.find(x => x.id === id);
+    const from = S.models.find(x => x.id === S.active), to = S.models.find(x => x.id === id);
     command({ action: 'switch', id });
     fx('route');
     flash(id);
-    if (m) addMsg('sys', 'Jarvis', `Routing to ${m.label}.`);
+    if (to) linkCard(from, to);
+  }
+
+  // ---- LINK TRANSFER card: shows exactly which model the link moves to
+  let pendingLink = null;
+  function linkCard(from, to) {
+    const tag = (txt, cls) => `<span class="lc-tag ${cls}">${txt}</span>`;
+    const badge = m => m ? [m.local ? tag('LOCAL', 'local') : tag('CLOUD', 'cloud'), m.paid ? tag('PAID', 'paid') : tag('FREE', 'free')].join('') : '';
+    const el = document.createElement('div');
+    el.className = 'link-card';
+    el.innerHTML = `
+      <div class="lc-head"><span>⚡ LINK TRANSFER</span><span class="lc-status">ESTABLISHING…</span></div>
+      <div class="lc-row lc-from"><span class="lc-k">FROM</span><span class="lc-name"></span><span class="lc-sub"></span></div>
+      <div class="lc-beam"><i></i></div>
+      <div class="lc-row lc-to"><span class="lc-k">TO</span><span class="lc-name"></span><span class="lc-sub"></span></div>
+      <div class="lc-tags">${badge(to)}</div>
+      <div class="lc-model"></div>`;
+    el.querySelector('.lc-from .lc-name').textContent = from ? from.label : '—';
+    el.querySelector('.lc-from .lc-sub').textContent = from ? from.group : '';
+    el.querySelector('.lc-to .lc-name').textContent = to.label;
+    el.querySelector('.lc-to .lc-sub').textContent = to.group;
+    el.querySelector('.lc-model').textContent = to.model;
+    log.appendChild(el); log.scrollTop = log.scrollHeight;
+    decipher(el.querySelector('.lc-to .lc-name'), to.label, 700);
+    setTimeout(() => { el.classList.add('done'); el.querySelector('.lc-status').textContent = 'LINKED'; fx('msg'); }, 1100);
+    pendingLink = { el, id: to.id };
+  }
+  function linkLatency(id, ms) {
+    if (!pendingLink || pendingLink.id !== id) return;
+    const s = pendingLink.el.querySelector('.lc-status'); s.textContent = `LINKED · ${(ms / 1000).toFixed(2)} s`;
+    pendingLink = null;
   }
   function toggleSeat(id) {
     let ids = S.council.includes(id) ? S.council.filter(x => x !== id) : [...S.council, id];
@@ -485,6 +515,7 @@
             if (pending !== null) pending = d.text;
           } else if (d.type === 'end') {
             if (bubble) { bubble.classList.remove('typing'); if (d.ms) bubble.querySelector('.ms').textContent = (d.ms / 1000).toFixed(1) + 's'; }
+            if (d.ms) linkLatency(d.speaker, d.ms);
             const speakIt = role !== 'member' || !S.councilMode ? true : store.get('speakMembers', false);
             if (speakIt) pending = bubbleText;
             if (role === 'answer' || role === 'verdict') finalText = bubbleText;
@@ -497,7 +528,7 @@
             addMsg('sys', 'Jarvis', `${d.label} taking over.`);
             beams.push({ from: d.from, to: d.to, life: 2.5 });
           } else if (d.type === 'command') {
-            if (d.action === 'switch') { S.active = d.id; render(); flash(d.id); fx('route'); }
+            if (d.action === 'switch') { const from = S.models.find(x => x.id === S.active), to = S.models.find(x => x.id === d.id); S.active = d.id; render(); flash(d.id); fx('route'); if (to) linkCard(from, to); }
             if (d.action === 'voice') changeVoice(d.query);
             if (d.action === 'holo') setHolo(d.on, true);
             if (d.action === 'scene') setScene(d.scene, true);

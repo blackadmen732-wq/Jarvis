@@ -249,7 +249,9 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
   - warm colours (Amber, Gold, Crimson): a **solar flare** rises from the core, arcs out and loops around the model you're using. Switch models and a new flare grows toward the new one.
   - cool colours (Ice, Violet, Emerald): crackling **plasma lightning** from the core to the model.
   - the Neural Links panel marks it **⚡ linked** with a moving plasma bar.
-- **The backdrop is the real Milky Way** (ESO's panorama photo). In Black Hole mode the hole actually bends it: stars swirl around the edge and a thin photon ring appears.
+  - the Comms Log shows a **LINK TRANSFER** card: FROM model → TO model, provider, LOCAL/CLOUD and FREE/PAID tags, the exact model ID, then **LINKED · latency** after its first reply.
+- **The backdrop is the real Milky Way** (ESO's panorama photo), colour-graded into deep blues and violets, with three layers of twinkling stars, soft nebula colour and a big **ringed planet**. **Move your mouse** and the layers shift at different depths. The black hole draws its disk, shadow and photon ring on top without warping the sky.
+- **Gravity:** every model orbits the core on its own path (faint orbit lines); closer ones move faster, like real planets. The linked model's orbit glows.
 - **Control-room readouts** around the core show live data: core form and state, the linked model and provider, latency, how many links work, uptime, and Signal / Links gauges.
 - **Holo** shows/hides the holographic layer: gear-toothed machine rings turning around the core, wireframe drones orbiting and firing scan beams, and a radar sweep on the floor. Say *"hide the holograms"* / *"show the holograms"*.
 

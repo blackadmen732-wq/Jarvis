@@ -15,6 +15,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { createSun, SUN_R } from './sun.js';
 import { createCores, CORE_RADIUS } from './cores.js';
+import { createSky } from './sky.js';
 
 // Colour themes: core, disk, sun, plasma lightning (the HUD panels follow via CSS in hud.js)
 export const THEMES = {
@@ -66,13 +67,10 @@ function start() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#030508');
   // a real galaxy all around: ESO's Milky Way panorama (ESO/S. Brunier, CC BY 4.0)
-  const skyTex = new THREE.TextureLoader().load(mobile ? 'assets/milkyway-small.jpg' : 'assets/milkyway.jpg', tex => {
-    tex.mapping = THREE.EquirectangularReflectionMapping; tex.colorSpace = THREE.SRGBColorSpace;
-    scene.background = tex; scene.backgroundIntensity = 0.42; scene.backgroundRotation.set(0.55, 0.3, 0.42);
-  });
-  skyTex.generateMipmaps = false; skyTex.minFilter = THREE.LinearFilter;
+  const sky = createSky(scene, { mobile, src: mobile ? 'assets/milkyway-small.jpg' : 'assets/milkyway.jpg' });
+  const skyTex = sky.texture;
   scene.fog = new THREE.FogExp2(0x030508, 0.028);
-  const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 300);
+  const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 1200);
   camera.position.set(0, mobile ? 4.2 : 3.0, mobile ? 21 : 12);
 
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -234,12 +232,13 @@ function start() {
   const dust = new Float32Array(1500 * 3);
   for (let i = 0; i < 1500; i++) { const v = new THREE.Vector3(rand() - 0.5, rand() - 0.5, rand() - 0.5).normalize().multiplyScalar(40 + rand() * 50); dust.set([v.x, v.y, v.z], i * 3); }
   const dGeo = new THREE.BufferGeometry(); dGeo.setAttribute('position', new THREE.BufferAttribute(dust, 3));
-  scene.add(new THREE.Points(dGeo, new THREE.PointsMaterial({ color: 0x6a8fb5, size: 0.18, ...additive, opacity: 0.5 })));
+  // (close dust replaced by the sky module's star layers)
 
   // holographic tech layer: gear-ring machine, drones, radar
   const holo = createHolo(scene, glow, { mobile });
   const scenes = createScenes(scene, { glow, mobile, reduce, pixelRatio: renderer.getPixelRatio() });
   let reactorVis = 1, floorVis = 1, hudVis = 1, firstFrame = true;
+  const orbitAngle = {};
   const blackhole = createBlackHole(scene, renderer, camera, { mobile, reduce, sky: skyTex });
   const sun = createSun(scene, glow, { mobile });
   const cores = createCores(scene, glow, { mobile });
@@ -362,6 +361,7 @@ function start() {
       if (n.bolts) { n.bolts.forEach(releaseBolt); n.bolts = null; }
       n.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== pulseMat) o.material.dispose(); });
       if (n.label.element.parentNode) n.label.element.parentNode.removeChild(n.label.element);
+      if (n.orbitLine) { nodeGroup.remove(n.orbitLine); n.orbitLine.geometry.dispose(); n.orbitLine.material.dispose(); }
       nodeGroup.remove(n.group);
     }
     nodes = []; hitTargets.length = 0;
@@ -370,10 +370,11 @@ function start() {
   function buildNodes() {
     disposeNodes();
     const list = hud.models().filter(m => m.installed || m.id === hud.getFrame().active);
-    const n = list.length, R = mobile ? 3.0 : 3.95;
+    const n = list.length, R0 = mobile ? 2.7 : 3.55, dR = mobile ? 0.32 : 0.48;
     list.forEach((m, i) => {
       const a = i / n * TAU + 0.35;
-      const pos = new THREE.Vector3(Math.cos(a) * R, 0.55 + Math.sin(i * 1.9) * (mobile ? 2.2 : 1.25), Math.sin(a) * R);
+      const R = R0 + (i % 4) * dR;                                       // different orbits = different speeds
+      const pos = new THREE.Vector3(Math.cos(a) * R, 0.55 + Math.sin(i * 1.9) * (mobile ? 2.0 : 1.1), Math.sin(a) * R);
       const g = new THREE.Group(); nodeGroup.add(g);
       const st = m.status ? m.status.state : 'ready';
       const col = st === 'error' ? RED : st === 'missing' ? GREY : BLUE;
@@ -422,7 +423,11 @@ function start() {
       el.addEventListener('mouseleave', () => { if (hoverId === m.id) hoverId = null; });
       const label = new CSS2DObject(el); label.position.copy(pos).add(new THREE.Vector3(0, -0.42, 0)); g.add(label);
 
-      nodes.push({ id: m.id, pos, group: g, orb, halo, ring, route, routeMat, tube, curve, label, el, phase: r() * TAU });
+      // faint orbit path at this model's distance and height
+      const op = []; for (let k = 0; k <= 160; k++) { const aa = k / 160 * TAU; op.push(new THREE.Vector3(Math.cos(aa) * R, pos.y, Math.sin(aa) * R)); }
+      const orbitLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(op), new THREE.LineBasicMaterial({ color: BLUE, ...additive, opacity: 0.09 }));
+      nodeGroup.add(orbitLine);
+      nodes.push({ id: m.id, pos, R, group: g, orb, halo, ring, route, routeMat, tube, curve, label, el, orbitLine, phase: r() * TAU, w: 0.9 / Math.pow(R, 1.5) });
     });
   }
   const nodeById = id => nodes.find(n => n.id === id);
@@ -495,9 +500,14 @@ function start() {
     sun.update(dt, t, L, scenes.vis.sun);
     cores.update(dt, t, L, scenes.vis, camera);
     const orbitVis = scenes.vis.blackhole + scenes.vis.sun;
-    nodeGroup.rotation.y += dt * 0.045 * orbitVis;                       // models orbit the core like satellites
+    // gravity: every model orbits on its own path, inner ones faster (Kepler), keeping its spin between rebuilds
+    const orbitSpeed = 0.35 + 1.0 * orbitVis;
+    for (const n of nodes) { orbitAngle[n.id] = (orbitAngle[n.id] || 0) + dt * n.w * orbitSpeed; n.group.rotation.y = orbitAngle[n.id];
+      n.orbitLine.material.opacity = (n.id === f.active ? 0.28 : 0.08) * (0.4 + 0.6 * orbitVis); n.orbitLine.material.color.copy(n.id === f.active ? AMBER : BLUE); }
+    sky.update(dt, t, camera, renderer.getPixelRatio());
     const coreR = 0.75 * reactorVis + 1.35 * scenes.vis.blackhole + SUN_R * 1.08 * scenes.vis.sun + 2.0 * scenes.vis.brain + Object.keys(CORE_RADIUS).reduce((s, k) => s + CORE_RADIUS[k] * (scenes.vis[k] || 0), 0);
     bloom.intensity = (0.85 + L * 0.9) * (1 - 0.15 * scenes.vis.blackhole);
+    f.floorVis = floorVis;
     holo.update(dt, t, L, f.holo !== false, f, camera.position);
 
     // nodes + routes
@@ -573,17 +583,20 @@ function start() {
       const key = b.from + '>' + b.to; live.add(key);
       let o = beamObjs.get(key);
       if (!o) {
-        const curve = beamCurve(A.pos, B.pos);
-        const mat = new THREE.ShaderMaterial({ ...additive, uniforms: { uA: { value: 1 } }, ...beamShader });
-        const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.02, 5, false), mat);
-        nodeGroup.add(mesh); o = { mesh, mat, curve }; beamObjs.set(key, o);
+        const geo = new LineGeometry(); const mat = new LineMaterial({ vertexColors: true, linewidth: 2.2, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+        mat.resolution.set(innerWidth, innerHeight); lineMats.push(mat);
+        const mesh = new Line2(geo, mat); mesh.frustumCulled = false; scene.add(mesh); o = { mesh, mat }; beamObjs.set(key, o);
       }
-      const a = Math.min(1, b.life / 0.6); o.mat.uniforms.uA.value = a;
+      const Aw = A.orb.getWorldPosition(new THREE.Vector3()), Bw = B.orb ? B.orb.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3();
+      const curve = beamCurve(Aw, Bw), P = [], C = [];
+      for (let k = 0; k <= 32; k++) { const q = curve.getPoint(k / 32); P.push(q.x, q.y, q.z); const c = BLUE.clone().lerp(RED, k / 32); C.push(c.r, c.g, c.b); }
+      o.mesh.geometry.setPositions(P); o.mesh.geometry.setColors(C);
+      const a = Math.min(1, b.life / 0.6); o.mat.opacity = a;
       for (let k = 0; k < 3 && pi < pulses.length; k++) {
-        const p = pulses[pi++]; p.visible = true; p.position.copy(o.curve.getPointAt((t * 0.8 + k / 3) % 1)).applyMatrix4(nodeGroup.matrixWorld); p.scale.setScalar(0.26 * a);
+        const p = pulses[pi++]; p.visible = true; p.position.copy(curve.getPoint((t * 0.8 + k / 3) % 1)); p.scale.setScalar(0.26 * a);
       }
     }
-    for (const [key, o] of beamObjs) if (!live.has(key)) { nodeGroup.remove(o.mesh); o.mesh.geometry.dispose(); o.mat.dispose(); beamObjs.delete(key); }
+    for (const [key, o] of beamObjs) if (!live.has(key)) { scene.remove(o.mesh); o.mesh.geometry.dispose(); lineMats.splice(lineMats.indexOf(o.mat), 1); o.mat.dispose(); beamObjs.delete(key); }
     for (; pi < pulses.length; pi++) pulses[pi].visible = false;
 
     if (!controls.autoRotate && !reduce && performance.now() - lastTouch > 6000) controls.autoRotate = true;

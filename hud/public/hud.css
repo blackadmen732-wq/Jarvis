@@ -108,7 +108,7 @@ button { font: inherit; color: inherit; }
 
 /* ---------- log ---------- */
 .log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin; scrollbar-color: rgba(255,168,58,.3) transparent; }
-.msg { border-left: 2px solid var(--blue); padding: 6px 10px; background: rgba(79,184,255,.06); animation: in .25s ease-out; }
+.msg { flex: none; border-left: 2px solid var(--blue); padding: 6px 10px; background: rgba(79,184,255,.06); animation: in .25s ease-out; }
 .msg .who { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--blue); margin-bottom: 3px; display: flex; justify-content: space-between; gap: 8px; }
 .msg .text { font-size: 15px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; }
 .msg.user { border-color: var(--amber); background: rgba(255,168,58,.07); align-self: flex-end; max-width: 92%; }
@@ -283,3 +283,29 @@ body.booted .links.first .link { animation: in .35s ease-out both; }
 .g-label { text-align: center; margin-top: 4px; letter-spacing: .2em; }
 body.booting .readout { opacity: 0; } body.booted .readout { animation: in .8s ease-out .4s both; }
 @media (max-width: 1250px) { .readout { display: none; } }
+
+/* ================= LINK TRANSFER card ================= */
+.link-card { flex: none; position: relative; border: 1px solid var(--line); background: linear-gradient(135deg, rgba(255,168,58,.08), rgba(79,184,255,.05)); padding: 9px 11px; animation: in .3s ease-out; overflow: hidden; }
+.link-card::before { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.08) 50%, transparent 70%); transform: translateX(-100%); animation: sweep 1.1s ease-out; }
+.lc-head { display: flex; justify-content: space-between; font: 500 10px var(--mono); letter-spacing: .18em; color: var(--amber); margin-bottom: 6px; }
+.lc-status { color: var(--dim); }
+.link-card.done .lc-status { color: var(--amber-hot); text-shadow: 0 0 8px var(--amber); }
+.lc-row { display: grid; grid-template-columns: 40px 1fr auto; align-items: baseline; gap: 8px; }
+.lc-k { font: 400 9px var(--mono); letter-spacing: .16em; color: var(--dim); }
+.lc-name { font: 600 15px var(--ui); letter-spacing: .04em; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-from .lc-name { color: var(--dim); text-decoration: line-through rgba(255,255,255,.25); }
+.lc-to .lc-name { color: var(--amber-hot); }
+.lc-sub { font: 400 10px var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: .1em; }
+.lc-beam { height: 14px; margin: 3px 0 3px 48px; position: relative; }
+.lc-beam::before { content: ""; position: absolute; left: 0; right: 0; top: 6px; height: 2px; background: var(--line); }
+.lc-beam i { position: absolute; left: 0; top: 6px; height: 2px; width: 0; background: linear-gradient(90deg, var(--amber), var(--amber-hot)); box-shadow: 0 0 10px var(--amber); animation: fill 1.1s cubic-bezier(.4,0,.2,1) forwards; }
+.lc-tags { display: flex; gap: 6px; margin: 7px 0 4px; }
+.lc-tag { font: 500 9px var(--mono); letter-spacing: .14em; padding: 2px 6px; border: 1px solid; }
+.lc-tag.local { color: #7dffc6; border-color: rgba(125,255,198,.4); } .lc-tag.cloud { color: #8fdcff; border-color: rgba(143,220,255,.4); }
+.lc-tag.free { color: var(--amber-hot); border-color: var(--line); } .lc-tag.paid { color: #ff9a8a; border-color: rgba(255,154,138,.4); }
+.lc-model { font: 400 9px var(--mono); color: rgba(150,165,185,.7); word-break: break-all; }
+@keyframes fill { to { width: 100%; } }
+@keyframes sweep { to { transform: translateX(100%); } }
+/* the newly linked row in Neural Links flashes once */
+.link.active { animation: linkflash 1.2s ease-out 1; }
+@keyframes linkflash { 0% { background: rgba(255,211,138,.35); } 100% { background: rgba(255,168,58,.1); } }
