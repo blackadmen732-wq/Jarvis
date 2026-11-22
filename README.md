@@ -48,6 +48,7 @@ You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) insta
    docker compose up -d
    ```
 5. Open **http://localhost:3000** and create your account. The first account becomes the admin.
+   The hub only accepts connections from this computer. To use it from your phone on the same Wi-Fi, make your admin account first, then change `"127.0.0.1:3000:8080"` to `"3000:8080"` in `docker-compose.yml` and run `docker compose up -d`.
 
 **Check it works:** click the model dropdown at the top. You should see a long list of models. Pick one ending in `:free` and say hi.
 
@@ -267,6 +268,10 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 | "Change colour to blue" / "purple theme" | Change the colour theme |
 | "Hide the holograms" / "show the holograms" | Holographic layer on/off |
 | "Switch to Qwen 7B" / "use the coder" / "use vision" | Your local uncensored models |
+| "Lina rule: if we lose 3 in a row, stop until I restart" | Writes it in Lina, checks it, tells you what it means (see section 9) |
+| "Confirm" / "cancel" | Save or discard the Lina rule Jarvis just checked |
+| "List my Lina rules" | Reads your saved rules |
+| "How did the bots do?" / "bot report" | Last night's Edge Bot training results (read-only, paper money) |
 | Anything else | Answered by the active model (or the council) |
 
 **Council mode (AIs talking to each other):** the council members answer one after another. Each sees what the others said and agrees, adds or disagrees by name. Then Jarvis (your active model) gives the final verdict, which is the part spoken out loud. Default council: Nemotron Ultra + GPT-OSS (Groq) + Qwen (Cerebras); a full round takes about 4 seconds. Each round uses one request per member + one for the verdict.
@@ -277,7 +282,33 @@ It starts with everything else. Open **http://localhost:3001** in **Chrome or Ed
 
 ![Jarvis HUD on a phone](docs/hud-phone.jpg)
 
+**Safety:** the HUD only answers pages opened on this computer (`localhost:3001` or `127.0.0.1:3001`). Other websites you visit can't use it to switch models or spend your credit. To open it under another name, add it as `HUD_ALLOWED_HOSTS=name:3001` under `hud` → `environment` in `docker-compose.yml`.
+
 > **Privacy note:** Chrome and Edge send your *speech audio* to Google/Microsoft to turn it into text. The words Jarvis speaks back are made on your computer. If you want 100% offline voice, use the Jarvis desktop app (section 6) with your local model.
+
+## 9. Lina: rules for your bots, by voice
+
+Lina Sigra is a small language for bot rules. Every rule is checked word by word, and it can only make a bot *more careful*: pause, stop, watch, ask you, or run the approved paper rule at full, half or quarter size. Money words (`moni`, `paga` pay, `vori` buy, `sori` sell, `dela` give, `toma` take, `valida` approve) are always refused.
+
+1. Say (or type): *"Jarvis, Lina rule: if risk is above 0.8, pause for 10 days."*
+2. The **Lina writer** model writes `se risk es alta 0.8: na va pausa 10 dia`. If the checker rejects its first try, it gets one more try with the reason.
+3. Jarvis tells you what the checked rule means in plain English.
+4. Say **"confirm"** to save it (or **"cancel"**). Saved rules are in `rules.lina` inside the HUD's data volume, with the English meaning and a fingerprint.
+
+You can also type Lina directly: *"Lina se fila de tri mala: na va halta"* (three losses in a row: stop until you restart).
+
+- **Which model writes Lina:** `"lina_writer"` in `hud/models.json` (default: GPT-OSS on Groq). When the trained Lina model is ready, it goes here.
+- **The checker** is the `lina` service: the same Lina engine as Edge Bot, with no port on your computer. Update it with `./scripts/update-lina.sh <path to your edge-bot folder>`.
+- **Edge Bot report:** *"How did the bots do?"* reads the public, read-only training summary. No key needed.
+
+## 10. Lite mode (Chromebook, 4–8 GB RAM)
+
+```bash
+./scripts/lite.sh          # HUD + router + Lina + local engine, no hub and no studio voices
+./scripts/lite.sh small    # same, and download the 2 GB uncensored model (8 GB RAM)
+./scripts/lite.sh stop
+```
+Open **http://localhost:3001/?2d** for the lighter 2D HUD. You need at least one free cloud key in `.env` (Groq is fast). On a Chromebook, turn on Linux first (Settings → About ChromeOS → Developers) and give it at least 20 GB of disk.
 
 ---
 

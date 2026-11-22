@@ -11,10 +11,17 @@ const ROUTER = (process.env.ROUTER_URL || 'http://127.0.0.1:8082').replace(/\/$/
 const OLLAMA = (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
 const ROUTER_TOKEN = process.env.ROUTER_TOKEN || 'jarvis';
 const KOKORO = (process.env.KOKORO_URL || 'http://127.0.0.1:8880').replace(/\/$/, '');
+const LINA = (process.env.LINA_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
+// Edge Bot's public, read-only training summary (the PARALLAX dashboard feed). No key needed.
+const EDGEBOT = process.env.EDGEBOT_URL || 'https://mhahkbssltukjhusjsjf.supabase.co/functions/v1/parallax-money?view=training';
+// Who may talk to this server: only pages opened from this computer. Add more as HUD_ALLOWED_HOSTS=name:port,...
+const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`,
+  ...String(process.env.HUD_ALLOWED_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean)]);
 const CONFIG_PATH = process.env.HUD_CONFIG || path.join(__dirname, 'models.json');
 const PERSONA_PATH = process.env.PERSONA_PATH || path.join(__dirname, '..', 'jarvis', 'jarvis-persona.md');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_PATH = path.join(DATA_DIR, 'state.json');
+const RULES_PATH = path.join(DATA_DIR, 'rules.lina');            // Lina rules you confirmed by voice
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // ---------------------------------------------------------------- config/state
@@ -34,6 +41,7 @@ const state = {
   council: saved.council || config.council || [],
   extra: saved.extra || [],           // models added by voice ("switch to llama")
 };
+let pendingRule = null;               // a checked Lina rule waiting for "confirm" 
 function saveState() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -127,8 +135,17 @@ async function resolveModel(query) {
 }
 
 function parseCommand(text) {
-  const t = norm(text).replace(/^(hey |ok |okay )?jarvis\s*/, '');
+  const raw = String(text || '').trim().replace(/^(hey |ok |okay )?jarvis[\s,:]*/i, '');
   let m;
+  if (/^(?:list |show |read )?(?:me )?(?:my |the )?lina rules[.!?]*$/i.test(raw)) return { action: 'lina_list' };
+  // Lina: keep the words as spoken/typed (numbers like 0.8 and -0.05 matter), only drop the trigger words
+  if ((m = raw.match(/^(?:write |make |create |add )?(?:a |an |the )?lina(?: rule| sigra)?\s*[:,-]?\s*(?:to |that |for |saying )?(.+)$/i)) && m[1].trim())
+    return { action: 'lina', text: m[1].trim().replace(/[.!?]+$/, '') };
+  const t = norm(text).replace(/^(hey |ok |okay )?jarvis\s*/, '');
+  if (/^(confirm|confirmed|save it|yes save( it)?|save the rule|keep it)$/.test(t)) return { action: 'lina_confirm' };
+  if (/^(cancel|discard( it)?|never mind|forget it|don t save( it)?)$/.test(t)) return { action: 'lina_cancel' };
+  if (/^(list|show|read)( me)?( my| the)? (lina )?rules$/.test(t)) return { action: 'lina_list' };
+  if (/^(how (did|are|is) (the |my )?(bots?|brains?|training|edge ?bot)( doing| do| going)?|(bot|brains?|training|edge ?bot|nightly) (report|status|update))$/.test(t)) return { action: 'edgebot' };
   if ((m = t.match(/^(?:switch to |go to |activate |enter |show |show me |open |change to |switch scene to |change scene to )?(?:the )?(auto|automatic|adaptive|black hole|blackhole|singularity|sun|star|solar|circuit|circuit sphere|pulse|pulse sphere|spike|plasma|plasma orb|plasma ball|portal|warp|warp portal|vortex|liquid|liquid glass|glass|neural brain|brain|neural|data stream|stream|data flow|flow|reactor|normal|default|classic)(?: mode| scene| view| core| sphere)$/)) ||
       (m = t.match(/^(?:switch|change|set) (?:the )?scene (?:to )?(auto|black hole|blackhole|sun|circuit|pulse|plasma|portal|liquid|neural brain|brain|neural|data stream|stream|reactor|normal|default)$/)) ||
       (m = t.match(/^(?:make|turn|change)(?: the)? (?:core|center|centre|middle)(?: into| to)?(?: a| the)? (black hole|sun|star|reactor|brain|circuit|plasma|portal|liquid|pulse)$/))) {
@@ -276,6 +293,23 @@ async function handleChat(body, send) {
     const okCount = allModels().filter(m => m.status.state === 'ok').length;
     return say(`Running on ${a ? a.label : 'nothing'}. Router ${routerOnline ? 'online' : 'offline'}, local engine ${localOnline ? 'online with ' + localModels.length + ' models' : 'offline'}. ${okCount} links confirmed working. Council mode is ${state.councilMode ? 'on' : 'off'}.`);
   }
+  if (cmd && cmd.action === 'lina') return linaRule(cmd.text, send, say);
+  if (cmd && cmd.action === 'lina_confirm') {
+    if (!pendingRule) return say('There is no Lina rule waiting. Say "Lina rule" and then what you want.');
+    const n = saveRule(pendingRule); const r = pendingRule; pendingRule = null;
+    send({ type: 'command', action: 'lina', status: 'saved', rule: r.text });
+    return say(`Saved. You now have ${n} Lina rule${n === 1 ? '' : 's'}. ${r.english}`);
+  }
+  if (cmd && cmd.action === 'lina_cancel') {
+    if (!pendingRule) return say('Nothing to cancel.');
+    pendingRule = null; return say('Discarded. Nothing was saved.');
+  }
+  if (cmd && cmd.action === 'lina_list') {
+    const rules = readRules();
+    if (!rules.length) return say('You have no saved Lina rules yet.');
+    return say(rules.slice(-5).map((r, i) => `Rule ${rules.length - Math.min(5, rules.length) + i + 1}: ${r.english}`).join(' '));
+  }
+  if (cmd && cmd.action === 'edgebot') return say(await edgebotReport());
   if (cmd && cmd.action === 'list') {
     return say('Available: ' + allModels().filter(m => m.installed).map(m => m.label).join(', ') + '.');
   }
@@ -311,6 +345,77 @@ async function handleChat(body, send) {
   await speak(send, active, system,
     [{ role: 'user', content: `Question: ${message}\n\nCouncil views:\n${said.map(s => `${s.label}: ${s.text}`).join('\n')}` }],
     'verdict', { fallback });
+}
+
+// ---------------------------------------------------------------- Lina (Lina Sigra checker, ../lina)
+async function lina(pathname, body) {
+  const r = await fetch(LINA + pathname, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) } : { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error('Lina checker HTTP ' + r.status);
+  return r.json();
+}
+const firstLine = t => (String(t || '').split('\n').map(l => l.trim().replace(/^`+|`+$/g, '').trim()).find(Boolean) || '');
+
+// English (or Lina) -> one checked Lina rule. The writer model only writes text; the Lina engine decides if it is valid.
+async function linaRule(request, send, say) {
+  let line = /^se\s/i.test(request) ? request : '', check = null, tries = 0;
+  try {
+    if (line) check = await lina('/check', { text: line });
+    else {
+      const prompt = await lina('/prompt');
+      const writer = byId(config.lina_writer) || byId(state.active) || allModels()[0];
+      const shots = prompt.shots.flatMap(([q, a]) => [{ role: 'user', content: q }, { role: 'assistant', content: a }]);
+      let messages = [...shots, { role: 'user', content: request }];
+      while (tries < 2) {                                  // one retry, with the engine's reason, if the first try is invalid
+        tries++;
+        const text = await speak(send, writer, prompt.system, messages, 'lina', { maxTokens: 120, fallback: byId(config.fallback) });
+        line = firstLine(text);
+        if (!line) break;
+        check = await lina('/check', { text: line });
+        if (check.ok) break;
+        messages = [...messages, { role: 'assistant', content: line }, { role: 'user', content: `Lina rejected that: ${check.error}. Write the corrected rule only.` }];
+      }
+    }
+  } catch (e) {
+    return say(`The Lina checker isn't answering (${cleanError(e.message)}). Run docker compose up -d lina.`);
+  }
+  if (!line || !check) return say("I couldn't get a Lina rule out of that. Try saying it more simply.");
+  if (!check.ok) { send({ type: 'command', action: 'lina', status: 'invalid', rule: line, error: check.error }); return say(`Lina rejected ${line}. ${check.error}`); }
+  if (check.rules.length !== 1) return say('Please give me one rule at a time.');
+  pendingRule = { text: check.rules[0].text, english: check.rules[0].english, fingerprint: check.fingerprint };
+  send({ type: 'command', action: 'lina', status: 'valid', rule: pendingRule.text, english: pendingRule.english });
+  say(`Valid Lina: ${pendingRule.text}. That means: ${pendingRule.english} Say confirm to save it, or cancel.`);
+}
+
+function readRules() {
+  let src = '';
+  try { src = fs.readFileSync(RULES_PATH, 'utf8'); } catch { return []; }
+  const out = []; let english = '';
+  for (const l of src.split('\n')) {
+    if (l.startsWith('# means: ')) english = l.slice(9);
+    else if (l.trim() && !l.startsWith('#')) { out.push({ text: l.trim(), english }); english = ''; }
+  }
+  return out;
+}
+function saveRule(r) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.appendFileSync(RULES_PATH, `# saved ${new Date().toISOString()} (fingerprint ${String(r.fingerprint).slice(0, 16)})\n# means: ${r.english}\n${r.text}\n`);
+  return readRules().length;
+}
+
+// ---------------------------------------------------------------- Edge Bot by voice (read-only)
+async function edgebotReport() {
+  try {
+    const r = await fetch(EDGEBOT, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json(); const n = j.latest; const t = j.totals || {};
+    if (!n) return 'Edge Bot has no nightly results yet.';
+    const day = new Date(n.at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    const best = [...(n.markets || [])].sort((a, b) => (b.best_level || 0) - (a.best_level || 0))[0];
+    const grads = (n.markets || []).reduce((s, m) => s + (m.graduates || 0), 0);
+    return `Last training night was ${day}. ${n.markets.length} markets, best was ${best.name} at level ${best.best_level} of 8. ` +
+      `${grads ? grads + ' bots graduated that night' : 'No bot graduated that night'}. All time: ${(t.bots_tested || 0).toLocaleString('en-US')} bots tested, ` +
+      `${t.graduates || 0} graduates, ${t.proven || 0} proven. ${n.alarm_ok ? 'No alarms.' : 'The safety alarm went off, check the report.'} Paper money only.`;
+  } catch (e) { return `I couldn't reach Edge Bot (${cleanError(e.message)}).`; }
 }
 
 // ---------------------------------------------------------------- studio voices (Kokoro)
@@ -373,8 +478,22 @@ function publicState() {
   };
 }
 
+// Only pages opened on this computer may use the HUD. Without this, any website you visit could quietly switch you to a
+// paid model or start chats with your keys (a "simple" cross-site POST), or read answers through DNS rebinding.
+function allowed(req) {
+  const host = String(req.headers.host || '').toLowerCase();
+  if (!ALLOWED_HOSTS.has(host)) return 'unknown host';
+  const origin = req.headers.origin;
+  if (origin && origin !== 'null' && !ALLOWED_HOSTS.has(origin.replace(/^https?:\/\//, '').toLowerCase())) return 'cross-site request';
+  if (origin === 'null') return 'cross-site request';
+  if (req.method === 'POST' && !/^application\/json\b/i.test(String(req.headers['content-type'] || ''))) return 'JSON only';
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  const blocked = allowed(req);
+  if (blocked) { res.writeHead(403, { 'content-type': 'text/plain' }); return res.end('blocked: ' + blocked); }
   try {
     if (url.pathname === '/api/state' && req.method === 'GET') {
       await refreshHealth();
@@ -416,4 +535,4 @@ refreshHealth().finally(() => server.listen(PORT, () => {
   console.log(`Jarvis HUD on http://localhost:${PORT}  (router ${ROUTER}, ollama ${OLLAMA})`);
 }));
 
-module.exports = { parseCommand, norm };
+module.exports = { parseCommand, norm, allowed, firstLine };

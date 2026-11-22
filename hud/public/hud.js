@@ -468,7 +468,7 @@
             flushSpeech();
             role = d.role;
             const kind = ({ member: 'member', verdict: 'verdict', system: 'sys' })[d.role] || '';
-            const who = d.role === 'member' ? `${d.label} · council` : d.role === 'verdict' ? `Jarvis verdict · ${d.label}` : d.role === 'system' ? 'Jarvis' : `Jarvis · ${d.label}`;
+            const who = d.role === 'member' ? `${d.label} · council` : d.role === 'verdict' ? `Jarvis verdict · ${d.label}` : d.role === 'system' ? 'Jarvis' : d.role === 'lina' ? `Lina writer · ${d.label}` : `Jarvis · ${d.label}`;
             bubble = addMsg(kind + ' typing', who, ''); bubbleText = '';
             if (d.speaker !== 'jarvis') {
               if (S.councilMode && prevSpeaker && prevSpeaker !== d.speaker) beams.push({ from: prevSpeaker, to: d.speaker, life: 2.6 });
@@ -485,7 +485,7 @@
             if (pending !== null) pending = d.text;
           } else if (d.type === 'end') {
             if (bubble) { bubble.classList.remove('typing'); if (d.ms) bubble.querySelector('.ms').textContent = (d.ms / 1000).toFixed(1) + 's'; }
-            const speakIt = role !== 'member' || !S.councilMode ? true : store.get('speakMembers', false);
+            const speakIt = role === 'lina' ? false : role !== 'member' || !S.councilMode ? true : store.get('speakMembers', false);   // Jarvis explains Lina in English
             if (speakIt) pending = bubbleText;
             if (role === 'answer' || role === 'verdict') finalText = bubbleText;
             if (role === 'system' && !finalText) finalText = bubbleText;
@@ -503,6 +503,7 @@
             if (d.action === 'scene') setScene(d.scene, true);
             if (d.action === 'theme') setTheme(d.theme, true);
             if (d.action === 'council') { S.councilMode = d.on; render(); chime(d.on ? 520 : 880, d.on ? 780 : 520); }
+            if (d.action === 'lina') { if (d.status === 'invalid') chime(300, 220); else chime(660, d.status === 'saved' ? 990 : 880); }
           } else if (d.type === 'council') {
             d.members.forEach((id, k) => setTimeout(() => beams.push({ from: S.active, to: id, life: 1.6 }), k * 150));
           } else if (d.type === 'done') {

@@ -1,6 +1,7 @@
 {
-  "_help": "Your favourite models. 'model' is provider/model as the router knows it. 'aliases' are words you can say: 'Jarvis, switch to <alias>'. 'group' picks the colour family on the HUD. Local Ollama models you download are added automatically.",
+  "_help": "Your favourite models. 'model' is provider/model as the router knows it. 'aliases' are words you can say: 'Jarvis, switch to <alias>'. 'group' picks the colour family on the HUD. Local Ollama models you download are added automatically. 'lina_writer' is the model that turns your spoken rules into Lina (the Lina checker always has the final word).",
   "active": "groq",
+  "lina_writer": "groq",
   "fallback": "qwen7b",
   "council": [
     "nemotron",

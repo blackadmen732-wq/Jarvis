@@ -4,13 +4,14 @@
 #   router     = lets Claude Code & other coding agents use those models
 #   hud        = Jarvis holographic voice interface (http://localhost:3001)
 #   voice      = natural studio voices for Jarvis (Kokoro)
+#   lina       = Lina Sigra checker: turns spoken rules into checked Lina (no port on your computer)
 #
 # Start:  docker compose up -d      then open http://localhost:3000
 # Stop:   docker compose down       (your chats and models are kept)
 
 services:
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.17     # pinned so an update can't break things; change the number to update
     container_name: jarvis-ollama
     restart: unless-stopped
     volumes:
@@ -32,7 +33,8 @@ services:
     depends_on:
       - ollama
     ports:
-      - "3000:8080"
+      - "127.0.0.1:3000:8080"      # only reachable from this computer. To use the hub from your phone on the
+                                   # same Wi-Fi, change it to "3000:8080" AFTER you have made your admin account.
     environment:
       WEBUI_NAME: ${WEBUI_NAME:-Jarvis OS}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?Set WEBUI_SECRET_KEY in .env}
@@ -79,12 +81,14 @@ services:
       - router
       - ollama
       - voice
+      - lina
     ports:
       - "127.0.0.1:3001:3001"      # only reachable from this computer
     environment:
       ROUTER_URL: http://router:8082
       OLLAMA_URL: http://ollama:11434
       KOKORO_URL: http://voice:8880
+      LINA_URL: http://lina:8090
     volumes:
       - ./hud/models.json:/app/models.json:ro          # edit favourites, then restart hud
       - ./jarvis/jarvis-persona.md:/app/persona.md:ro  # Jarvis's personality
@@ -98,6 +102,13 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8880:8880"      # voice playground at http://localhost:8880/web
+
+  # Lina Sigra checker: the HUD sends it rules; it answers valid/invalid + the plain-English meaning.
+  # Locked words (money, pay, buy, sell, give, take, approve) are always refused. Tiny: ~50 MB RAM.
+  lina:
+    build: ./lina
+    container_name: jarvis-lina
+    restart: unless-stopped
 
 volumes:
   ollama:
